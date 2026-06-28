@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <title>Rio Trading — Wholesale Catalogue</title>
+  <meta name="description" content="Rio Trading wholesale product catalogue. Browse our full range and place your trade order." />
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- EmailJS CDN -->
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+  <!-- jsPDF + AutoTable CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <!-- ============================================================
+       HEADER / NAVBAR
+  ============================================================ -->
+  <header class="site-header">
+    <div class="header-inner">
+      <!-- Brand -->
+      <div class="brand">
+        <div class="brand-icon">RT</div>
+        <div class="brand-text">
+          <span class="brand-name">Rio Trading</span>
+          <span class="brand-sub">WHOLESALE</span>
+        </div>
+      </div>
+      <!-- Cart icon button (top-right) -->
+      <button id="cartIconBtn" class="cart-icon-btn" aria-label="View order" title="View order">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 0 1-8 0"/>
+        </svg>
+        <span id="cartIconCount" class="cart-icon-count hidden">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       HERO BANNER
+  ============================================================ -->
+  <section class="hero">
+    <div class="hero-inner">
+      <h1 class="hero-title">Wholesale Catalogue</h1>
+      <p class="hero-sub">Browse our full range, select quantities, and place your order in minutes.</p>
+      <span class="hero-badge">Trade Only</span>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       STICKY SEARCH + CATEGORY FILTERS
+  ============================================================ -->
+  <div class="filters-wrap" id="filtersWrap">
+    <div class="filters-inner">
+      <!-- Search -->
+      <div class="search-wrap">
+        <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="search" id="searchInput" class="search-input" placeholder="Search products…"
+          aria-label="Search products" autocomplete="off" />
+      </div>
+
+      <!-- Category pills (scrollable row) -->
+      <div class="category-pills" id="categoryPills" role="tablist" aria-label="Filter by category">
+        <button class="pill active" role="tab" data-cat="all">All</button>
+        <button class="pill" role="tab" data-cat="Grocery &amp; Essentials">Grocery &amp; Essentials</button>
+        <button class="pill" role="tab" data-cat="Beverages">Beverages</button>
+        <button class="pill" role="tab" data-cat="Confectionery">Confectionery</button>
+        <button class="pill" role="tab" data-cat="Health &amp; Beauty">Health &amp; Beauty</button>
+        <button class="pill" role="tab" data-cat="Catering">Catering</button>
+        <button class="pill" role="tab" data-cat="Pet Food">Pet Food</button>
+        <button class="pill" role="tab" data-cat="Snacks">Snacks</button>
+      </div>
+
+      <!-- Subcategory pills row (hidden by default, shown when parent has subcats) -->
+      <div class="subcategory-pills hidden" id="subcategoryPills" role="tablist" aria-label="Filter by subcategory">
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       PRODUCT GRID
+  ============================================================ -->
+  <main class="catalogue-main">
+    <div class="product-grid" id="productGrid">
+      <!-- Cards injected by JS -->
+    </div>
+    <!-- Empty state -->
+    <div class="empty-state hidden" id="emptyState">
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+        stroke="#9CA3AF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <p>No products found</p>
+      <span>Try a different search or category</span>
+    </div>
+  </main>
+
+  <!-- ============================================================
+       STICKY BOTTOM ORDER BAR
+  ============================================================ -->
+  <div class="order-bar hidden" id="orderBar">
+    <div class="order-bar-inner">
+      <span class="order-bar-info">
+        <span id="barItemCount">0 items</span>
+        <span class="order-bar-dot">·</span>
+        <span id="barTotal">£0.00</span>
+      </span>
+      <button id="viewOrderBtn" class="btn btn-primary btn-sm" aria-label="View order">
+        View Order
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       ORDER REVIEW DRAWER
+  ============================================================ -->
+  <div class="drawer-backdrop hidden" id="drawerBackdrop"></div>
+
+  <aside class="drawer hidden" id="orderDrawer" aria-label="Order review" role="dialog">
+    <div class="drawer-header">
+      <div>
+        <h2 class="drawer-title">Order Review</h2>
+        <p class="drawer-subtitle" id="drawerSubtitle">0 items · £0.00</p>
+      </div>
+      <button class="drawer-close" id="drawerClose" aria-label="Close order drawer">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="drawer-body" id="drawerBody">
+      <!-- Cart items injected by JS -->
+      <div class="drawer-empty hidden" id="drawerEmpty">
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none"
+          stroke="#D1D5DB" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <path d="M16 10a4 4 0 0 1-8 0"/>
+        </svg>
+        <p>Your order is empty</p>
+        <span>Add products from the catalogue</span>
+      </div>
+    </div>
+
+    <div class="drawer-footer">
+      <div class="drawer-total">
+        <span class="drawer-total-label">Order Total</span>
+        <span class="drawer-total-price" id="drawerTotal">£0.00</span>
+      </div>
+      <button class="btn btn-primary btn-full" id="proceedBtn" aria-label="Proceed to send order">
+        Proceed to Send Order
+      </button>
+    </div>
+  </aside>
+
+  <!-- ============================================================
+       CUSTOMER DETAILS FORM DRAWER
+  ============================================================ -->
+  <aside class="drawer hidden" id="formDrawer" aria-label="Customer details" role="dialog">
+    <div class="drawer-header">
+      <div>
+        <h2 class="drawer-title">Customer Details</h2>
+        <p class="drawer-subtitle">Please fill in your details to complete the order.</p>
+      </div>
+      <button class="drawer-close" id="formDrawerClose" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="drawer-body">
+      <form id="orderForm" novalidate>
+
+        <!-- Shop / Business Name -->
+        <div class="form-field">
+          <label class="form-label" for="shopName">Shop / Business Name <span class="required">*</span></label>
+          <input class="form-input" type="text" id="shopName" name="shopName"
+            placeholder="e.g. Corner Shop Ltd" autocomplete="organization" required />
+          <span class="form-error hidden" id="shopNameErr">Please enter your shop or business name.</span>
+        </div>
+
+        <!-- Contact Person Name -->
+        <div class="form-field">
+          <label class="form-label" for="contactName">Contact Person Name <span class="required">*</span></label>
+          <input class="form-input" type="text" id="contactName" name="contactName"
+            placeholder="e.g. John Smith" autocomplete="name" required />
+          <span class="form-error hidden" id="contactNameErr">Please enter the contact person's name.</span>
+        </div>
+
+        <!-- Phone Number -->
+        <div class="form-field">
+          <label class="form-label" for="phone">Phone Number <span class="required">*</span></label>
+          <input class="form-input" type="tel" id="phone" name="phone"
+            placeholder="e.g. 07700 900123" autocomplete="tel" required />
+          <span class="form-error hidden" id="phoneErr">Please enter a valid UK phone number.</span>
+        </div>
+
+        <!-- Email Address -->
+        <div class="form-field">
+          <label class="form-label" for="email">Email Address <span class="required">*</span></label>
+          <input class="form-input" type="email" id="email" name="email"
+            placeholder="e.g. orders@yourshop.co.uk" autocomplete="email" required />
+          <span class="form-error hidden" id="emailErr">Please enter a valid email address.</span>
+        </div>
+
+        <!-- Special Notes -->
+        <div class="form-field">
+          <label class="form-label" for="notes">
+            Special Notes / Instructions
+            <span class="form-optional">(optional)</span>
+          </label>
+          <textarea class="form-input form-textarea" id="notes" name="notes"
+            placeholder="e.g. Please deliver before 10am" rows="3"></textarea>
+        </div>
+
+      </form>
+    </div>
+
+    <div class="drawer-footer drawer-footer-split">
+      <button class="btn btn-outline" id="backToReviewBtn" aria-label="Back to order review">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+        Back to Review
+      </button>
+      <button class="btn btn-primary" id="sendOrderBtn" aria-label="Send order">
+        Send Order
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ============================================================
+       ORDER RESULT DRAWER (Success / Error)
+  ============================================================ -->
+  <aside class="drawer hidden" id="resultDrawer" aria-label="Order result" role="dialog">
+    <div class="drawer-header">
+      <h2 class="drawer-title" id="resultTitle">Order Submitted</h2>
+      <button class="drawer-close" id="resultDrawerClose" aria-label="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="drawer-body result-body" id="resultBody">
+      <!-- Injected by JS -->
+    </div>
+
+    <div class="drawer-footer" id="resultFooter">
+      <!-- Injected by JS -->
+    </div>
+  </aside>
+
+  <!-- Main app script -->
+  <script src="/script.js"></script>
+</body>
+</html>
