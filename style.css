@@ -215,6 +215,15 @@ input, textarea { font-family: inherit; }
   backdrop-filter: blur(4px);
 }
 
+.card-qty-badge {
+  position: absolute; top: 8px; right: 8px;
+  min-width: 22px; height: 22px;
+  background: #EF4444; color: #fff;
+  border-radius: 11px; font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
 .card-body { padding: 12px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
 .card-name  { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.35; }
 .card-price { font-size: 17px; font-weight: 700; color: var(--blue); margin-top: 2px; }
@@ -242,10 +251,10 @@ input, textarea { font-family: inherit; }
 .btn-add.edit:hover { background: #DBEAFE; }
 
 /* Stepper (expanded) */
-.stepper { display: flex; align-items: center; gap: 4px; width: 100%; }
+.stepper { display: flex; align-items: center; gap: 3px; width: 100%; }
 .stepper-btn {
-  flex-shrink: 0; width: 30px; height: 36px; border-radius: 6px;
-  font-size: 16px; font-weight: 600; background: var(--bg); color: var(--text);
+  flex-shrink: 0; width: 26px; height: 36px; border-radius: 6px;
+  font-size: 15px; font-weight: 600; background: var(--bg); color: var(--text);
   border: 1.5px solid var(--border);
   display: flex; align-items: center; justify-content: center;
   transition: all 140ms var(--ease);
@@ -254,9 +263,9 @@ input, textarea { font-family: inherit; }
 .stepper-btn:active { transform: scale(0.94); }
 
 .stepper-input {
-  flex: 1; min-width: 0; height: 36px; text-align: center;
+  flex: 1 1 30px; min-width: 24px; max-width: 140px; height: 36px; padding: 0; text-align: center;
   border: 1.5px solid var(--border); border-radius: 6px;
-  font-size: 14px; font-weight: 600; color: var(--text); background: #fff;
+  font-size: 13px; font-weight: 600; color: var(--text); background: #fff;
   outline: none; transition: border-color 150ms;
   -moz-appearance: textfield;
 }
@@ -265,13 +274,22 @@ input, textarea { font-family: inherit; }
 .stepper-input:focus { border-color: var(--blue-light); }
 
 .stepper-confirm {
-  flex-shrink: 0; width: 36px; height: 36px; border-radius: 6px;
+  flex-shrink: 0; width: 30px; height: 36px; border-radius: 6px;
   background: var(--blue-dark); color: #fff;
   display: flex; align-items: center; justify-content: center;
   transition: background 160ms var(--ease), transform 120ms var(--ease);
 }
 .stepper-confirm:hover  { background: var(--blue); }
 .stepper-confirm:active { transform: scale(0.94); }
+
+.stepper-remove {
+  flex-shrink: 0; width: 28px; height: 36px; border-radius: 6px;
+  background: #FEF2F2; color: var(--error); border: 1.5px solid #FECACA;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 140ms var(--ease), transform 120ms var(--ease);
+}
+.stepper-remove:hover  { background: #FEE2E2; }
+.stepper-remove:active { transform: scale(0.94); }
 
 /* ============================================================
    STICKY ORDER BAR
@@ -591,10 +609,11 @@ input, textarea { font-family: inherit; }
   .card-footer { padding: 0 10px 10px; }
   .card-name { font-size: 12px; }
   .card-price { font-size: 15px; }
-  .stepper { gap: 3px; }
-  .stepper-btn { width: 28px; height: 34px; }
-  .stepper-input { height: 34px; font-size: 13px; }
-  .stepper-confirm { width: 34px; height: 34px; }
+  .stepper { gap: 2px; }
+  .stepper-btn { width: 24px; height: 34px; }
+  .stepper-input { height: 34px; font-size: 12px; max-width: 88px; }
+  .stepper-confirm { width: 26px; height: 34px; }
+  .stepper-remove { width: 26px; height: 34px; }
   .btn-add { height: 34px; font-size: 12px; }
 }
 

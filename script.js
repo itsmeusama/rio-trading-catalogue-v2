@@ -290,6 +290,7 @@ function buildCard(product) {
       <img class="card-img" src="${getImg(product)}" alt="${product.name}" loading="lazy"
         onerror="this.src='${FALLBACK_IMG}'" />
       <span class="card-cat-badge">${product.category}</span>
+      <span class="card-qty-badge${inCart ? '' : ' hidden'}">${qty}</span>
     </div>
     <div class="card-body">
       <div class="card-name">${product.name}</div>
@@ -311,6 +312,15 @@ function buildCard(product) {
             <polyline points="20 6 9 17 4 12"/>
           </svg>
         </button>
+        <button class="stepper-remove" aria-label="Remove item from order">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            <path d="M10 11v6"/><path d="M14 11v6"/>
+            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+          </svg>
+        </button>
       </div>
     </div>`;
 
@@ -325,6 +335,12 @@ function wireCardEvents(card, product) {
   const plus    = card.querySelector('.stepper-plus');
   const input   = card.querySelector('.stepper-input');
   const confirm = card.querySelector('.stepper-confirm');
+  const remove  = card.querySelector('.stepper-remove');
+
+  function closeStepper() {
+    stepper.classList.add('hidden');
+    addBtn.classList.remove('hidden');
+  }
 
   /* Show stepper */
   addBtn.addEventListener('click', () => {
@@ -354,15 +370,22 @@ function wireCardEvents(card, product) {
     cart[product.id] = qty;
     saveCart();
     updateCartUI();
-    stepper.classList.add('hidden');
-    addBtn.textContent = 'Edit';
-    addBtn.classList.add('edit');
-    addBtn.classList.remove('hidden');
+    closeStepper();
+    syncCardBtn(product.id);
+  });
+
+  remove.addEventListener('click', () => {
+    delete cart[product.id];
+    delete discounts[product.id];
+    saveCart();
+    updateCartUI();
+    closeStepper();
+    syncCardBtn(product.id);
   });
 
   input.addEventListener('keydown', e => {
     if (e.key === 'Enter')  confirm.click();
-    if (e.key === 'Escape') { stepper.classList.add('hidden'); addBtn.classList.remove('hidden'); }
+    if (e.key === 'Escape') closeStepper();
   });
 }
 
@@ -667,17 +690,23 @@ function refreshDrawerTotals() {
 }
 
 function syncCardBtn(productId) {
-  /* Sync Add/Edit button on the catalogue card */
+  /* Sync Add/Edit button + qty badge on the catalogue card */
   const card = productGrid.querySelector('[data-id="' + productId + '"]');
   if (!card) return;
-  const btn = card.querySelector('.btn-add');
+  const btn   = card.querySelector('.btn-add');
+  const badge = card.querySelector('.card-qty-badge');
+  const qty   = cart[productId] || 0;
   if (!btn) return;
-  if (cart[productId]) {
+  if (qty > 0) {
     btn.textContent = 'Edit';
     btn.classList.add('edit');
   } else {
     btn.textContent = 'Add';
     btn.classList.remove('edit');
+  }
+  if (badge) {
+    badge.textContent = qty;
+    badge.classList.toggle('hidden', qty === 0);
   }
 }
 
