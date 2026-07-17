@@ -73,6 +73,8 @@ const FALLBACK_IMG = 'https://images.unsplash.com/photo-1586201375761-83865001e3
    ============================================================ */
 let allProducts = [];
 let cart = {};
+let discounts = {};
+let orderDiscountPct = 0;
 let activeCategory    = 'all';
 let activeSubcategory = 'all';
 let searchQuery       = '';
@@ -115,15 +117,26 @@ const resultFooter      = document.getElementById('resultFooter');
    CART PERSISTENCE
    ============================================================ */
 function saveCart() {
-  localStorage.setItem('rioTradingCart', JSON.stringify(cart));
+  localStorage.setItem('rioTradingCart', JSON.stringify({ cart, discounts, orderDiscountPct }));
 }
 
 function loadCart() {
   try {
     const saved = localStorage.getItem('rioTradingCart');
-    if (saved) cart = JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed.cart === 'object') {
+        cart             = parsed.cart             || {};
+        discounts        = parsed.discounts        || {};
+        orderDiscountPct = parsed.orderDiscountPct || 0;
+      } else {
+        cart             = parsed || {};
+        discounts        = {};
+        orderDiscountPct = 0;
+      }
+    }
   } catch (e) {
-    cart = {};
+    cart = {}; discounts = {}; orderDiscountPct = 0;
   }
 }
 
@@ -137,8 +150,33 @@ function cartItemCount() {
 function cartTotal() {
   return Object.entries(cart).reduce((sum, [id, qty]) => {
     const p = allProducts.find(x => x.id === id);
-    return p ? sum + p.price * qty : sum;
+    if (!p) return sum;
+    const sub = p.price * qty;
+    return sum + sub - getItemDiscountAmount(id, sub, p.price);
   }, 0);
+}
+
+function cartFinalTotal() {
+  const sub = cartTotal();
+  if (!orderDiscountPct) return sub;
+  return sub - sub * Math.min(100, Math.max(0, orderDiscountPct)) / 100;
+}
+
+function getItemDiscountAmount(productId, subtotal, unitPrice) {
+  const d = discounts[productId];
+  if (!d || !d.value) return 0;
+  if (d.mode === 'pct') return subtotal * Math.min(100, Math.max(0, d.value)) / 100;
+  /* fixed: discount is per unit — clamp to unit price, then multiply by qty */
+  const discPerUnit = Math.min(unitPrice, Math.max(0, d.value));
+  const qty = unitPrice > 0 ? Math.round(subtotal / unitPrice) : 1;
+  return discPerUnit * qty;
+}
+
+function formatDiscountLabel(d) {
+  if (!d || !d.value) return '+ Discount';
+  return d.mode === 'pct'
+    ? d.value + '% off'
+    : '£' + Number(d.value).toFixed(2) + ' off';
 }
 
 /* Format a number as GBP */
@@ -333,7 +371,7 @@ function wireCardEvents(card, product) {
    ============================================================ */
 function updateCartUI() {
   const count = cartItemCount();
-  const total = cartTotal();
+  const total = cartFinalTotal();
 
   if (count > 0) {
     orderBar.classList.remove('hidden');
@@ -371,104 +409,261 @@ function openOrderDrawer() {
 }
 
 function renderOrderDrawer() {
-  const count = cartItemCount();
-  const total = cartTotal();
-  drawerSubtitle.textContent = count + ' item' + (count !== 1 ? 's' : '') + ' \u00B7 ' + fmt(total);
-  drawerTotal.textContent    = fmt(total);
-
   /* Remove previous cart rows */
-  Array.from(drawerBody.querySelectorAll('.cart-item')).forEach(el => el.remove());
+  Array.from(drawerBody.querySelectorAll('.cart-item-wrap')).forEach(el => el.remove());
 
+  const count = cartItemCount();
   if (count === 0) {
     drawerEmpty.classList.remove('hidden');
-    return;
+  } else {
+    drawerEmpty.classList.add('hidden');
+    Object.entries(cart).forEach(([id, qty]) => {
+      const p = allProducts.find(x => x.id === id);
+      if (p) drawerBody.insertBefore(buildCartRow(p, qty), drawerEmpty);
+    });
   }
-  drawerEmpty.classList.add('hidden');
 
-  Object.entries(cart).forEach(([id, qty]) => {
-    const p = allProducts.find(x => x.id === id);
-    if (p) drawerBody.insertBefore(buildCartRow(p, qty), drawerEmpty);
-  });
+  refreshDrawerTotals();
 }
 
 function buildCartRow(product, qty) {
-  const row = document.createElement('div');
-  row.className  = 'cart-item';
-  row.dataset.id = product.id;
+  const wrap = document.createElement('div');
+  wrap.className  = 'cart-item-wrap';
+  wrap.dataset.id = product.id;
 
+  /* ---- Product row ---- */
+  const row = document.createElement('div');
+  row.className = 'cart-item';
+  const sub0 = product.price * qty;
+  const disc0 = getItemDiscountAmount(product.id, sub0, product.price);
   row.innerHTML = `
     <img class="cart-item-img" src="${getImg(product)}" alt="${product.name}" loading="lazy"
       onerror="this.src='${FALLBACK_IMG}'" />
     <div class="cart-item-info">
       <div class="cart-item-name">${product.name}</div>
-      <div class="cart-item-unit">per ${product.unit || 'unit'}</div>
+      <div class="cart-item-price-line">
+        <span class="cart-item-orig-price">${fmt(product.price)}</span>
+        <span class="cart-item-disc-price"></span>
+        <span class="cart-item-per-unit">/ ${product.unit || 'unit'}</span>
+      </div>
     </div>
     <div class="stepper-compact">
       <button class="stepper-btn cart-minus" aria-label="Decrease">&minus;</button>
       <input class="stepper-input cart-qty" type="number" min="1" value="${qty}" aria-label="Quantity" />
       <button class="stepper-btn cart-plus" aria-label="Increase">+</button>
     </div>
-    <div class="cart-item-right">
-      <span class="cart-item-line-total">${fmt(product.price * qty)}</span>
-      <button class="cart-item-remove" aria-label="Remove item">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"/>
-          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-          <path d="M10 11v6"/><path d="M14 11v6"/>
-          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-        </svg>
-      </button>
+    <span class="cart-item-line-total">${fmt(sub0 - disc0)}</span>
+    <button class="cart-item-remove" aria-label="Remove item">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6"/><path d="M14 11v6"/>
+        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+      </svg>
+    </button>`;
+
+  /* ---- Discount trigger (appended into .cart-item-info) ---- */
+  const existingDisc  = discounts[product.id];
+  const hasDisc       = !!(existingDisc && existingDisc.value);
+  const discTrigger   = document.createElement('button');
+  discTrigger.className = 'disc-trigger' + (hasDisc ? ' disc-trigger--active' : '');
+  discTrigger.setAttribute('aria-expanded', String(hasDisc));
+  discTrigger.textContent = hasDisc ? formatDiscountLabel(existingDisc) : '+ Discount';
+  row.querySelector('.cart-item-info').appendChild(discTrigger);
+
+  /* ---- Discount row ---- */
+  const initMode  = existingDisc ? existingDisc.mode  : 'pct';
+  const initValue = existingDisc ? existingDisc.value : '';
+  const discRow   = document.createElement('div');
+  discRow.className = 'discount-row' + (hasDisc ? '' : ' discount-row--hidden');
+  discRow.innerHTML = `
+    <div class="discount-row-inner">
+      <div class="discount-toggle-btns">
+        <button class="disc-mode-btn${initMode === 'pct'   ? ' active' : ''}" data-mode="pct">%</button>
+        <button class="disc-mode-btn${initMode === 'fixed' ? ' active' : ''}" data-mode="fixed">£</button>
+      </div>
+      <input class="disc-input" type="number" min="0" step="0.01"
+        placeholder="${initMode === 'pct' ? '0–100' : '0.00'}"
+        value="${initValue}" aria-label="Discount value" />
+      <span class="disc-saving${hasDisc ? ' disc-saving--active' : ''}"></span>
+      <button class="disc-clear" aria-label="Remove discount">&times;</button>
     </div>`;
 
-  const minus     = row.querySelector('.cart-minus');
-  const plus      = row.querySelector('.cart-plus');
-  const qtyInput  = row.querySelector('.cart-qty');
-  const lineTotal = row.querySelector('.cart-item-line-total');
-  const removeBtn = row.querySelector('.cart-item-remove');
+  wrap.appendChild(row);
+  wrap.appendChild(discRow);
 
+  /* ---- DOM refs ---- */
+  const minus      = row.querySelector('.cart-minus');
+  const plus       = row.querySelector('.cart-plus');
+  const qtyInput   = row.querySelector('.cart-qty');
+  const lineTotal  = row.querySelector('.cart-item-line-total');
+  const removeBtn  = row.querySelector('.cart-item-remove');
+  const origPrice  = row.querySelector('.cart-item-orig-price');
+  const discPrice  = row.querySelector('.cart-item-disc-price');
+  const discInput  = discRow.querySelector('.disc-input');
+  const discSaving = discRow.querySelector('.disc-saving');
+  const discClear  = discRow.querySelector('.disc-clear');
+  const modeBtns   = discRow.querySelectorAll('.disc-mode-btn');
+
+  /* Seed price line + saving text if discount already active on open */
+  if (hasDisc && existingDisc) {
+    discSaving.textContent = 'Saving: ' + fmt(disc0);
+    const discedUnit = existingDisc.mode === 'pct'
+      ? product.price * (1 - existingDisc.value / 100)
+      : product.price - existingDisc.value;
+    origPrice.classList.add('cart-item-orig-price--struck');
+    discPrice.textContent = '→ ' + fmt(discedUnit);
+  }
+
+  /* ---- refresh: qty change → update line total ---- */
   function refresh() {
-    const q = parseInt(qtyInput.value,10) || 1;
+    const q   = parseInt(qtyInput.value, 10) || 1;
     cart[product.id] = q;
     saveCart();
-    lineTotal.textContent = fmt(product.price * q);
+    const sub = product.price * q;
+    lineTotal.textContent = fmt(sub - getItemDiscountAmount(product.id, sub, product.price));
     refreshDrawerTotals();
     updateCartUI();
     syncCardBtn(product.id);
   }
 
+  /* ---- refreshDiscount: discount input change ---- */
+  function refreshDiscount() {
+    const q      = parseInt(qtyInput.value, 10) || 1;
+    const sub    = product.price * q;
+    const activeBtn = discRow.querySelector('.disc-mode-btn.active');
+    const mode      = activeBtn ? activeBtn.dataset.mode : 'pct';
+    let val      = parseFloat(discInput.value);
+    if (isNaN(val) || val < 0) val = 0;
+    if (mode === 'pct')   val = Math.min(100, val);
+    if (mode === 'fixed') val = Math.min(product.price, val);
+
+    if (val > 0) {
+      discounts[product.id] = { mode, value: val };
+    } else {
+      delete discounts[product.id];
+    }
+    saveCart();
+
+    const discAmt = getItemDiscountAmount(product.id, sub, product.price);
+    lineTotal.textContent = fmt(sub - discAmt);
+
+    const activeDisc = discounts[product.id];
+    if (discAmt > 0 && activeDisc) {
+      /* Price line: strike original, show discounted unit price */
+      const discedUnit = activeDisc.mode === 'pct'
+        ? product.price * (1 - activeDisc.value / 100)
+        : product.price - activeDisc.value;
+      origPrice.classList.add('cart-item-orig-price--struck');
+      discPrice.textContent = '→ ' + fmt(discedUnit);
+      discSaving.textContent = 'Saving: ' + fmt(discAmt);
+      discSaving.classList.add('disc-saving--active');
+    } else {
+      origPrice.classList.remove('cart-item-orig-price--struck');
+      discPrice.textContent = '';
+      discSaving.textContent = '';
+      discSaving.classList.remove('disc-saving--active');
+    }
+
+    discTrigger.textContent = activeDisc ? formatDiscountLabel(activeDisc) : '+ Discount';
+    discTrigger.classList.toggle('disc-trigger--active', !!activeDisc);
+
+    refreshDrawerTotals();
+  }
+
+  /* ---- Qty stepper events ---- */
   minus.addEventListener('click', () => {
-    const v = parseInt(qtyInput.value,10) || 1;
+    const v = parseInt(qtyInput.value, 10) || 1;
     if (v > 1) { qtyInput.value = v - 1; refresh(); }
   });
   plus.addEventListener('click', () => {
-    qtyInput.value = (parseInt(qtyInput.value,10) || 1) + 1;
+    qtyInput.value = (parseInt(qtyInput.value, 10) || 1) + 1;
     refresh();
   });
   qtyInput.addEventListener('change', () => {
-    const v = parseInt(qtyInput.value,10);
+    const v = parseInt(qtyInput.value, 10);
     if (isNaN(v) || v < 1) qtyInput.value = 1;
     refresh();
   });
 
+  /* ---- Discount trigger toggle ---- */
+  discTrigger.addEventListener('click', () => {
+    const isOpen = !discRow.classList.contains('discount-row--hidden');
+    discRow.classList.toggle('discount-row--hidden', isOpen);
+    discTrigger.setAttribute('aria-expanded', String(!isOpen));
+    if (!isOpen) discInput.focus();
+  });
+
+  /* ---- Mode toggle ---- */
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const newMode = btn.dataset.mode;
+      discounts[product.id] = { mode: newMode, value: 0 };
+      discInput.value = '';
+      discInput.placeholder = newMode === 'pct' ? '0–100' : '0.00';
+      modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === newMode));
+      saveCart();
+      refreshDiscount();
+    });
+  });
+
+  /* ---- Discount input ---- */
+  discInput.addEventListener('input', refreshDiscount);
+
+  /* ---- Clear discount ---- */
+  discClear.addEventListener('click', () => {
+    delete discounts[product.id];
+    discInput.value = '';
+    origPrice.classList.remove('cart-item-orig-price--struck');
+    discPrice.textContent = '';
+    discSaving.textContent = '';
+    discSaving.classList.remove('disc-saving--active');
+    discTrigger.textContent = '+ Discount';
+    discTrigger.classList.remove('disc-trigger--active');
+    discRow.classList.add('discount-row--hidden');
+    discTrigger.setAttribute('aria-expanded', 'false');
+    const q   = parseInt(qtyInput.value, 10) || 1;
+    lineTotal.textContent = fmt(product.price * q);
+    saveCart();
+    refreshDrawerTotals();
+  });
+
+  /* ---- Remove item ---- */
   removeBtn.addEventListener('click', () => {
     delete cart[product.id];
+    delete discounts[product.id];
     saveCart();
-    row.remove();
+    wrap.remove();
     refreshDrawerTotals();
     updateCartUI();
     syncCardBtn(product.id);
     if (cartItemCount() === 0) drawerEmpty.classList.remove('hidden');
   });
 
-  return row;
+  return wrap;
 }
 
 function refreshDrawerTotals() {
-  const count = cartItemCount();
-  const total = cartTotal();
-  drawerSubtitle.textContent = count + ' item' + (count !== 1 ? 's' : '') + ' \u00B7 ' + fmt(total);
-  drawerTotal.textContent    = fmt(total);
+  const count   = cartItemCount();
+  const sub     = cartTotal();
+  const final   = cartFinalTotal();
+  const discAmt = sub - final;
+
+  drawerSubtitle.textContent = count + ' item' + (count !== 1 ? 's' : '') + ' \u00B7 ' + fmt(final);
+  drawerTotal.textContent    = fmt(final);
+
+  if (discAmt > 0) {
+    document.getElementById('orderSubtotalRow').classList.remove('hidden');
+    document.getElementById('orderSubtotalVal').textContent  = fmt(sub);
+    document.getElementById('orderDiscSaving').textContent   = '\u2212' + fmt(discAmt);
+    document.getElementById('orderDiscSaving').classList.remove('hidden');
+    document.getElementById('drawerTotalLabel').textContent  = 'Total Payable';
+  } else {
+    document.getElementById('orderSubtotalRow').classList.add('hidden');
+    document.getElementById('orderDiscSaving').classList.add('hidden');
+    document.getElementById('drawerTotalLabel').textContent  = 'Order Total';
+  }
 }
 
 function syncCardBtn(productId) {
@@ -613,10 +808,24 @@ async function submitOrder() {
 
   const items = Object.entries(cart).map(([id, qty]) => {
     const p = allProducts.find(x => x.id === id);
-    return p ? { name:p.name, unit:p.unit, qty, unitPrice:p.price, lineTotal:p.price*qty } : null;
+    if (!p) return null;
+    const subtotal    = p.price * qty;
+    const discountAmt = getItemDiscountAmount(id, subtotal, p.price);
+    const d           = discounts[id];
+    return {
+      name:          p.name,
+      unit:          p.unit,
+      qty,
+      unitPrice:     p.price,
+      discountAmt,
+      discountLabel: d && d.value ? formatDiscountLabel(d) : null,
+      lineTotal:     subtotal - discountAmt,
+    };
   }).filter(Boolean);
 
-  const total = cartTotal();
+  const subtotal        = cartTotal();
+  const total           = cartFinalTotal();
+  const orderDiscountAmt = subtotal - total;
 
   const orderLines = [
     '================================================',
@@ -627,14 +836,17 @@ async function submitOrder() {
       '\n   Unit: ' + (i.unit || '\u2014') +
       ' | Qty: ' + i.qty +
       ' | Unit Price: ' + fmt(i.unitPrice) +
+      (i.discountAmt > 0 ? ' | Discount: ' + i.discountLabel + ' (\u2212' + fmt(i.discountAmt) + ')' : '') +
       ' | Line Total: ' + fmt(i.lineTotal)
     ),
     '------------------------------------------------',
-    'ORDER TOTAL: ' + fmt(items.reduce((s, i) => s + i.lineTotal, 0)),
+    'ORDER SUBTOTAL: ' + fmt(subtotal),
+    ...(orderDiscountAmt > 0 ? ['ORDER DISCOUNT (' + orderDiscountPct + '%): \u2212' + fmt(orderDiscountAmt)] : []),
+    'ORDER TOTAL: ' + fmt(total),
     '================================================',
   ].join('\n');
 
-  const orderData = { orderRef, orderDate, shopName, contactName, phone, email, notes, items, total, orderLines };
+  const orderData = { orderRef, orderDate, shopName, contactName, phone, email, notes, items, subtotal, total, orderDiscountPct, orderDiscountAmt, orderLines };
   lastOrderData   = orderData;
 
   const emailjsOk =
@@ -752,7 +964,15 @@ function showResult(type, orderData, detail) {
 }
 
 function placeAnotherOrder() {
-  cart = {};
+  cart             = {};
+  discounts        = {};
+  orderDiscountPct = 0;
+  const discInput  = document.getElementById('orderDiscInput');
+  const discPanel  = document.getElementById('orderDiscPanel');
+  const discAddBtn = document.getElementById('orderDiscAddBtn');
+  if (discInput)  discInput.value = '';
+  if (discPanel)  discPanel.classList.remove('open');
+  if (discAddBtn) discAddBtn.classList.remove('hidden');
   saveCart();
   updateCartUI();
   closeAll();
@@ -771,39 +991,36 @@ function placeAnotherOrder() {
    Call .save() to download, or .output('datauristring') for base64. */
 function buildPDF(d) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const W   = doc.internal.pageSize.getWidth();
   const H   = doc.internal.pageSize.getHeight();
   const M   = 18;
-  let y     = M;
+  let   y   = M;
 
-  /* ---- Helper: horizontal rule ---- */
   function rule(yPos, thickness, gray) {
-    doc.setDrawColor(gray || 0);
+    doc.setDrawColor(gray !== undefined ? gray : 0);
     doc.setLineWidth(thickness || 0.3);
     doc.line(M, yPos, W - M, yPos);
   }
 
-  /* ---- HEADER ---- */
-  /* Company name \u2014 large, black, bold */
+  /* ================================================================
+     HEADER
+  ================================================================ */
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
   doc.text(CONFIG.BUSINESS_NAME.toUpperCase(), M, y + 7);
 
-  /* "ORDER RECEIPT" label \u2014 right-aligned, spaced caps */
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(80, 80, 80);
   doc.text('ORDER RECEIPT', W - M, y + 4, { align: 'right' });
 
-  /* Order reference below label */
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(0, 0, 0);
   doc.text(d.orderRef, W - M, y + 10, { align: 'right' });
 
-  /* Tagline below company name */
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 100, 100);
@@ -811,17 +1028,18 @@ function buildPDF(d) {
 
   y += 20;
 
-  /* Thick rule under header */
+  /* double rule */
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.8);
   doc.line(M, y, W - M, y);
   y += 1;
-  /* Thin second rule for double-line effect */
   doc.setLineWidth(0.2);
   doc.line(M, y, W - M, y);
   y += 7;
 
-  /* ---- ORDER DATE & REFERENCE row ---- */
+  /* ================================================================
+     DATE & REF
+  ================================================================ */
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(80, 80, 80);
@@ -839,13 +1057,14 @@ function buildPDF(d) {
 
   y += 10;
 
-  /* ---- CUSTOMER DETAILS box ---- */
+  /* ================================================================
+     CUSTOMER DETAILS
+  ================================================================ */
   const boxH = d.notes ? 38 : 30;
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.3);
   doc.rect(M, y, W - M * 2, boxH);
 
-  /* Section label inside box */
   doc.setFillColor(0, 0, 0);
   doc.rect(M, y, W - M * 2, 7, 'F');
   doc.setFont('helvetica', 'bold');
@@ -862,17 +1081,15 @@ function buildPDF(d) {
   const rowB = y + 21;
   const rowC = y + 28;
 
-  /* Left column */
   doc.setFont('helvetica', 'bold');   doc.text('Business:', M + 3, rowA);
   doc.setFont('helvetica', 'normal'); doc.text(d.shopName,    M + 22, rowA);
   doc.setFont('helvetica', 'bold');   doc.text('Contact:',   M + 3, rowB);
   doc.setFont('helvetica', 'normal'); doc.text(d.contactName, M + 22, rowB);
 
-  /* Right column */
   doc.setFont('helvetica', 'bold');   doc.text('Phone:', col2, rowA);
-  doc.setFont('helvetica', 'normal'); doc.text(d.phone,    col2 + 15, rowA);
-  doc.setFont('helvetica', 'bold');   doc.text('Email:',   col2, rowB);
-  doc.setFont('helvetica', 'normal'); doc.text(d.email,    col2 + 15, rowB);
+  doc.setFont('helvetica', 'normal'); doc.text(d.phone,   col2 + 15, rowA);
+  doc.setFont('helvetica', 'bold');   doc.text('Email:',  col2, rowB);
+  doc.setFont('helvetica', 'normal'); doc.text(d.email,   col2 + 15, rowB);
 
   if (d.notes) {
     doc.setFont('helvetica', 'bold');   doc.text('Notes:', M + 3, rowC);
@@ -881,73 +1098,130 @@ function buildPDF(d) {
 
   y += boxH + 8;
 
-  /* ---- ORDER ITEMS heading ---- */
+  /* ================================================================
+     ORDER ITEMS TABLE
+  ================================================================ */
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
   doc.setTextColor(80, 80, 80);
   doc.text('ORDER ITEMS', M, y);
   y += 1;
 
-  /* ---- ITEMS TABLE ---- */
+  const anyDiscount = d.items.some(i => i.discountAmt > 0);
+
+  let tableHead, tableBody, colStyles;
+
+  if (anyDiscount) {
+    /* 7 columns: include Discount and Net Unit Price */
+    tableHead = [['Product', 'Unit', 'Qty', 'Unit Price', 'Discount', 'Net Unit Price', 'Line Total']];
+    tableBody = d.items.map(i => {
+      const netUnit = i.qty > 0 ? i.lineTotal / i.qty : i.unitPrice;
+      return [
+        i.name,
+        i.unit || '\u2014',
+        i.qty,
+        fmt(i.unitPrice),
+        i.discountAmt > 0 ? i.discountLabel : '\u2014',
+        i.discountAmt > 0 ? fmt(netUnit)    : '\u2014',
+        fmt(i.lineTotal),
+      ];
+    });
+    colStyles = {
+      0: { cellWidth: 'auto' },
+      1: { cellWidth: 14, halign: 'center' },
+      2: { cellWidth: 12, halign: 'center' },
+      3: { cellWidth: 20, halign: 'right'  },
+      4: { cellWidth: 25, halign: 'center' },
+      5: { cellWidth: 22, halign: 'right'  },
+      6: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
+    };
+  } else {
+    /* 5 columns: clean simple layout */
+    tableHead = [['Product', 'Unit', 'Qty', 'Unit Price', 'Line Total']];
+    tableBody = d.items.map(i => [
+      i.name,
+      i.unit || '\u2014',
+      i.qty,
+      fmt(i.unitPrice),
+      fmt(i.lineTotal),
+    ]);
+    colStyles = {
+      0: { cellWidth: 'auto' },
+      1: { cellWidth: 18, halign: 'center' },
+      2: { cellWidth: 12, halign: 'center' },
+      3: { cellWidth: 24, halign: 'right'  },
+      4: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
+    };
+  }
+
   doc.autoTable({
     startY: y,
     margin: { left: M, right: M },
-    head: [['Product', 'Unit', 'Qty', 'Unit Price', 'Line Total']],
-    body: d.items.map(i => [i.name, i.unit || '\u2014', i.qty, fmt(i.unitPrice), fmt(i.lineTotal)]),
+    head: tableHead,
+    body: tableBody,
     styles: {
       fontSize: 8,
       cellPadding: 3,
       textColor: [0, 0, 0],
       lineColor: [180, 180, 180],
       lineWidth: 0.2,
+      overflow: 'linebreak',
     },
     headStyles: {
       fillColor: [0, 0, 0],
       textColor: [255, 255, 255],
       fontStyle: 'bold',
-      fontSize: 8,
+      fontSize: 7.5,
     },
     alternateRowStyles: { fillColor: [245, 245, 245] },
-    columnStyles: {
-      0: { cellWidth: 'auto' },
-      1: { cellWidth: 22, halign: 'center' },
-      2: { cellWidth: 14, halign: 'center' },
-      3: { cellWidth: 24, halign: 'right' },
-      4: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
-    },
+    columnStyles: colStyles,
   });
 
-  y = doc.lastAutoTable.finalY + 6;
+  y = doc.lastAutoTable.finalY + 8;
 
-  /* ---- TOTAL section ---- */
-  /* Thin rule above total */
+  /* ================================================================
+     TOTALS
+  ================================================================ */
+  const totRight = W - M;
+  const totLeft  = totRight - 84;
+
+  /* helper: one totals row */
+  function totLine(label, value, bold, size) {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal');
+    doc.setFontSize(size || 9);
+    doc.setTextColor(bold ? 0 : 80, bold ? 0 : 80, bold ? 0 : 80);
+    doc.text(label, totLeft, y);
+    doc.setTextColor(0, 0, 0);
+    doc.text(value, totRight, y, { align: 'right' });
+    y += 7;
+  }
+
   rule(y, 0.2, 180);
-  y += 4;
+  y += 5;
 
-  /* Subtotal label + value, right-aligned */
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(80, 80, 80);
-  doc.text('Subtotal (excl. VAT):', W - M - 50, y);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 0, 0);
-  doc.text(fmt(d.total), W - M, y, { align: 'right' });
-  y += 7;
+  /* Subtotal + order discount rows \u2014 only when an order discount exists */
+  if (d.orderDiscountAmt > 0) {
+    totLine('Subtotal (after item discounts):', fmt(d.subtotal || d.total));
+    totLine('Order Discount (' + d.orderDiscountPct + '%):', '-' + fmt(d.orderDiscountAmt));
+    rule(y, 0.2, 180);
+    y += 5;
+  }
 
-  /* Order total \u2014 bold, larger */
+  /* ORDER TOTAL */
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(0, 0, 0);
-  doc.text('ORDER TOTAL:', W - M - 50, y);
-  doc.text(fmt(d.total), W - M, y, { align: 'right' });
-  y += 2;
+  doc.text('ORDER TOTAL:', totLeft, y);
+  doc.text(fmt(d.total), totRight, y, { align: 'right' });
+  y += 3;
 
-  /* Thick rule below total */
   doc.setDrawColor(0, 0, 0);
   doc.setLineWidth(0.6);
-  doc.line(W - M - 70, y, W - M, y);
+  doc.line(totLeft, y, totRight, y);
 
-  /* ---- FOOTER ---- */
+  /* ================================================================
+     FOOTER
+  ================================================================ */
   y = H - 14;
   rule(y, 0.2, 180);
   y += 5;
@@ -962,6 +1236,52 @@ function buildPDF(d) {
 
 function downloadPDF(d) {
   buildPDF(d).save('Order-' + d.orderRef + '.pdf');
+}
+
+/* ============================================================
+   ORDER DISCOUNT UI
+   ============================================================ */
+function initOrderDiscountUI() {
+  const input    = document.getElementById('orderDiscInput');
+  const clearBtn = document.getElementById('orderDiscClear');
+  const addBtn   = document.getElementById('orderDiscAddBtn');
+  const panel    = document.getElementById('orderDiscPanel');
+
+  function openPanel() {
+    addBtn.classList.add('hidden');
+    panel.classList.add('open');
+    input.focus();
+  }
+
+  function closePanel() {
+    panel.classList.remove('open');
+    addBtn.classList.remove('hidden');
+    orderDiscountPct = 0;
+    input.value = '';
+    saveCart();
+    refreshDrawerTotals();
+    updateCartUI();
+  }
+
+  // Restore persisted discount from localStorage
+  if (orderDiscountPct > 0) {
+    input.value = orderDiscountPct;
+    openPanel();
+  }
+
+  addBtn.addEventListener('click', openPanel);
+
+  input.addEventListener('input', () => {
+    let val = parseFloat(input.value);
+    if (isNaN(val) || val < 0) val = 0;
+    val = Math.min(100, val);
+    orderDiscountPct = val;
+    saveCart();
+    refreshDrawerTotals();
+    updateCartUI();
+  });
+
+  clearBtn.addEventListener('click', closePanel);
 }
 
 /* ============================================================
@@ -1002,6 +1322,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSearch();
   initEvents();
   initLiveValidation();
+  initOrderDiscountUI();
   loadProducts();
   updateCartUI();
 });

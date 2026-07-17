@@ -52,6 +52,9 @@
        HERO BANNER
   ============================================================ -->
   <section class="hero">
+    <img class="hero-img" src="https://images.unsplash.com/photo-1553413077-190dd305871c?w=1280&q=80"
+      alt="Rio Trading warehouse" />
+    <div class="hero-overlay"></div>
     <div class="hero-inner">
       <h1 class="hero-title">Wholesale Catalogue</h1>
       <p class="hero-sub">Browse our full range, select quantities, and place your order in minutes.</p>
@@ -164,13 +167,42 @@
     </div>
 
     <div class="drawer-footer">
+
+      <!-- Subtotal row — shown only when an order discount is active -->
+      <div class="order-subtotal-row hidden" id="orderSubtotalRow">
+        <span class="order-subtotal-label">Subtotal</span>
+        <span class="order-subtotal-val" id="orderSubtotalVal">£0.00</span>
+      </div>
+
+      <!-- Trigger: shown by default, hidden when panel is open -->
+      <button class="order-disc-add-btn" id="orderDiscAddBtn" type="button">+ Add order discount</button>
+
+      <!-- Panel: collapsed by default, revealed on demand -->
+      <div class="order-disc-panel" id="orderDiscPanel">
+        <div class="order-disc-row">
+          <span class="order-disc-label">Order discount</span>
+          <div class="order-disc-controls">
+            <div class="order-disc-input-wrap">
+              <input class="order-disc-input" type="number" id="orderDiscInput"
+                min="0" max="100" step="0.1" placeholder="0" aria-label="Order discount %" />
+              <span class="order-disc-pct-sign">%</span>
+            </div>
+            <span class="order-disc-saving hidden" id="orderDiscSaving"></span>
+            <button class="order-disc-clear" id="orderDiscClear" type="button" aria-label="Remove order discount">&times;</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Total row -->
       <div class="drawer-total">
-        <span class="drawer-total-label">Order Total</span>
+        <span class="drawer-total-label" id="drawerTotalLabel">Order Total</span>
         <span class="drawer-total-price" id="drawerTotal">£0.00</span>
       </div>
+
       <button class="btn btn-primary btn-full" id="proceedBtn" aria-label="Proceed to send order">
         Proceed to Send Order
       </button>
+
     </div>
   </aside>
 
