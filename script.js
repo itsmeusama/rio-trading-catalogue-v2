@@ -88,12 +88,9 @@ const emptyState        = document.getElementById('emptyState');
 const searchInput       = document.getElementById('searchInput');
 const categoryPills     = document.getElementById('categoryPills');
 const subcategoryPills  = document.getElementById('subcategoryPills');
-const orderBar          = document.getElementById('orderBar');
-const barItemCount      = document.getElementById('barItemCount');
-const barTotal          = document.getElementById('barTotal');
-const viewOrderBtn      = document.getElementById('viewOrderBtn');
 const cartIconBtn       = document.getElementById('cartIconBtn');
 const cartIconCount     = document.getElementById('cartIconCount');
+const cartPillTotal     = document.getElementById('cartPillTotal');
 const drawerBackdrop    = document.getElementById('drawerBackdrop');
 const orderDrawer       = document.getElementById('orderDrawer');
 const drawerClose       = document.getElementById('drawerClose');
@@ -201,6 +198,7 @@ async function loadProducts() {
   if (!CONFIG.SHEET_CSV_URL) {
     allProducts = DEMO_PRODUCTS;
     renderGrid();
+    updateCartUI();
     return;
   }
   try {
@@ -211,10 +209,12 @@ async function loadProducts() {
     if (products.length === 0) throw new Error('Empty sheet');
     allProducts = products;
     renderGrid();
+    updateCartUI();
   } catch (err) {
     console.warn('Sheet load failed, using demo data.', err);
     allProducts = DEMO_PRODUCTS;
     renderGrid();
+    updateCartUI();
   }
 }
 
@@ -396,14 +396,12 @@ function updateCartUI() {
   const count = cartItemCount();
   const total = cartFinalTotal();
 
+  cartPillTotal.textContent = fmt(total);
+
   if (count > 0) {
-    orderBar.classList.remove('hidden');
-    barItemCount.textContent = count + ' item' + (count !== 1 ? 's' : '');
-    barTotal.textContent     = fmt(total);
     cartIconCount.textContent = count;
     cartIconCount.classList.remove('hidden');
   } else {
-    orderBar.classList.add('hidden');
     cartIconCount.classList.add('hidden');
   }
 }
@@ -769,6 +767,73 @@ function initSearch() {
     searchQuery = searchInput.value.trim();
     renderGrid();
   });
+}
+
+/* ============================================================
+   PROMO BANNER SLIDER
+   ============================================================ */
+function initPromoSlider() {
+  const track = document.getElementById('promoSliderTrack');
+  const dotsWrap = document.getElementById('promoSliderDots');
+  if (!track || !dotsWrap) return;
+
+  const slides = Array.from(track.querySelectorAll('.promo-slide'));
+  if (slides.length <= 1) return;
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const AUTO_ADVANCE_MS = 5000;
+  let current = 0;
+  let autoTimer = null;
+  let isSyncingScroll = false;
+
+  const dots = slides.map((_, i) => {
+    const dot = document.createElement('button');
+    dot.className = 'promo-dot' + (i === 0 ? ' active' : '');
+    dot.setAttribute('aria-label', 'Go to banner ' + (i + 1));
+    dot.addEventListener('click', () => goToSlide(i));
+    dotsWrap.appendChild(dot);
+    return dot;
+  });
+
+  function goToSlide(index) {
+    current = (index + slides.length) % slides.length;
+    isSyncingScroll = true;
+    track.scrollTo({ left: current * track.clientWidth, behavior: reduceMotion ? 'auto' : 'smooth' });
+    dots.forEach((d, i) => d.classList.toggle('active', i === current));
+  }
+
+  function startAuto() {
+    if (reduceMotion) return;
+    stopAuto();
+    autoTimer = setInterval(() => goToSlide(current + 1), AUTO_ADVANCE_MS);
+  }
+  function stopAuto() {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  }
+
+  /* Keep dots in sync when the user manually swipes/scrolls the track */
+  let scrollDebounce = null;
+  track.addEventListener('scroll', () => {
+    if (isSyncingScroll) { isSyncingScroll = false; return; }
+    clearTimeout(scrollDebounce);
+    scrollDebounce = setTimeout(() => {
+      const idx = Math.round(track.scrollLeft / track.clientWidth);
+      current = Math.max(0, Math.min(slides.length - 1, idx));
+      dots.forEach((d, i) => d.classList.toggle('active', i === current));
+    }, 100);
+  });
+
+  track.addEventListener('mouseenter', stopAuto);
+  track.addEventListener('mouseleave', startAuto);
+  track.addEventListener('touchstart', stopAuto, { passive: true });
+  track.addEventListener('touchend', startAuto, { passive: true });
+
+  window.addEventListener('resize', () => {
+    isSyncingScroll = true;
+    track.scrollTo({ left: current * track.clientWidth, behavior: 'auto' });
+  });
+
+  startAuto();
 }
 
 /* ============================================================
@@ -1318,7 +1383,6 @@ function initOrderDiscountUI() {
    ============================================================ */
 function initEvents() {
   cartIconBtn.addEventListener('click',   openOrderDrawer);
-  viewOrderBtn.addEventListener('click',  openOrderDrawer);
   drawerClose.addEventListener('click',   closeAll);
   drawerBackdrop.addEventListener('click', closeAll);
 
@@ -1349,6 +1413,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadCart();
   initCategoryPills();
   initSearch();
+  initPromoSlider();
   initEvents();
   initLiveValidation();
   initOrderDiscountUI();

@@ -29,36 +29,48 @@
     <div class="header-inner">
       <!-- Brand -->
       <div class="brand">
-        <div class="brand-icon">RT</div>
-        <div class="brand-text">
-          <span class="brand-name">Rio Trading</span>
-          <span class="brand-sub">WHOLESALE</span>
-        </div>
+        <img class="brand-logo" src="assets/rio-trading-logo.jpg" alt="Rio Trading" />
       </div>
-      <!-- Cart icon button (top-right) -->
-      <button id="cartIconBtn" class="cart-icon-btn" aria-label="View order" title="View order">
-        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
-          <line x1="3" y1="6" x2="21" y2="6"/>
-          <path d="M16 10a4 4 0 0 1-8 0"/>
+
+      <!-- Search -->
+      <div class="search-wrap">
+        <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <span id="cartIconCount" class="cart-icon-count hidden">0</span>
+        <input type="search" id="searchInput" class="search-input" placeholder="Search products…"
+          aria-label="Search products" autocomplete="off" />
+      </div>
+
+      <!-- Cart pill button (top-right) -->
+      <button id="cartIconBtn" class="cart-pill-btn" aria-label="View order" title="View order">
+        <span id="cartPillTotal" class="cart-pill-total">£0.00</span>
+        <span class="cart-pill-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <path d="M16 10a4 4 0 0 1-8 0"/>
+          </svg>
+          <span id="cartIconCount" class="cart-icon-count hidden">0</span>
+        </span>
       </button>
     </div>
   </header>
 
   <!-- ============================================================
-       HERO BANNER
+       PROMO BANNER SLIDER
+       To add more banners: drop another <img class="promo-slide">
+       into #promoSliderTrack — dots and auto-advance pick it up
+       automatically, no JS changes needed.
   ============================================================ -->
-  <section class="hero">
-    <img class="hero-img" src="https://images.unsplash.com/photo-1553413077-190dd305871c?w=1280&q=80"
-      alt="Rio Trading warehouse" />
-    <div class="hero-overlay"></div>
-    <div class="hero-inner">
-      <h1 class="hero-title">Wholesale Catalogue</h1>
-      <p class="hero-sub">Browse our full range, select quantities, and place your order in minutes.</p>
-      <span class="hero-badge">Trade Only</span>
+  <section class="promo-banner">
+    <div class="promo-slider" id="promoSlider">
+      <div class="promo-slider-track" id="promoSliderTrack">
+        <img class="promo-slide" src="assets/banner1.png" alt="Rio Trading — Product Catalog Made Simple, Orders Made Easy" />
+        <img class="promo-slide" src="assets/Banner.JPG" alt="Rio Trading — B2B Ordering for Shop Owners and Retailers" />
+      </div>
+      <div class="promo-slider-dots" id="promoSliderDots"></div>
     </div>
   </section>
 
@@ -67,16 +79,6 @@
   ============================================================ -->
   <div class="filters-wrap" id="filtersWrap">
     <div class="filters-inner">
-      <!-- Search -->
-      <div class="search-wrap">
-        <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-          fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input type="search" id="searchInput" class="search-input" placeholder="Search products…"
-          aria-label="Search products" autocomplete="off" />
-      </div>
-
       <!-- Category pills (scrollable row) -->
       <div class="category-pills" id="categoryPills" role="tablist" aria-label="Filter by category">
         <button class="pill active" role="tab" data-cat="all">All</button>
@@ -112,26 +114,6 @@
       <span>Try a different search or category</span>
     </div>
   </main>
-
-  <!-- ============================================================
-       STICKY BOTTOM ORDER BAR
-  ============================================================ -->
-  <div class="order-bar hidden" id="orderBar">
-    <div class="order-bar-inner">
-      <span class="order-bar-info">
-        <span id="barItemCount">0 items</span>
-        <span class="order-bar-dot">·</span>
-        <span id="barTotal">£0.00</span>
-      </span>
-      <button id="viewOrderBtn" class="btn btn-primary btn-sm" aria-label="View order">
-        View Order
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="9 18 15 12 9 6"/>
-        </svg>
-      </button>
-    </div>
-  </div>
 
   <!-- ============================================================
        ORDER REVIEW DRAWER
