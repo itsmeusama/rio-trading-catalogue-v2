@@ -91,6 +91,8 @@ const subcategoryPills  = document.getElementById('subcategoryPills');
 const cartIconBtn       = document.getElementById('cartIconBtn');
 const cartIconCount     = document.getElementById('cartIconCount');
 const cartPillTotal     = document.getElementById('cartPillTotal');
+const cartPillIcon      = document.getElementById('cartPillIcon');
+const brandLogoBtn      = document.getElementById('brandLogoBtn');
 const drawerBackdrop    = document.getElementById('drawerBackdrop');
 const orderDrawer       = document.getElementById('orderDrawer');
 const drawerClose       = document.getElementById('drawerClose');
@@ -392,6 +394,16 @@ function wireCardEvents(card, product) {
 /* ============================================================
    CART UI
    ============================================================ */
+let prevCartCount = 0;
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function bounceCartIcon() {
+  if (prefersReducedMotion || !cartPillIcon) return;
+  cartPillIcon.classList.remove('bounce-once');
+  void cartPillIcon.offsetWidth; /* force reflow so the animation can re-trigger */
+  cartPillIcon.classList.add('bounce-once');
+}
+
 function updateCartUI() {
   const count = cartItemCount();
   const total = cartFinalTotal();
@@ -404,6 +416,9 @@ function updateCartUI() {
   } else {
     cartIconCount.classList.add('hidden');
   }
+
+  if (count > prevCartCount) bounceCartIcon();
+  prevCartCount = count;
 }
 
 /* ============================================================
@@ -767,6 +782,18 @@ function initSearch() {
     searchQuery = searchInput.value.trim();
     renderGrid();
   });
+}
+
+/* ---- Logo click: reset to the default landing view ---- */
+function goHome() {
+  if (searchInput.value) {
+    searchInput.value = '';
+    searchQuery = '';
+  }
+  const allPill = categoryPills.querySelector('.pill[data-cat="all"]');
+  if (allPill) allPill.click(); /* reuses existing category-reset logic + renders grid */
+  else renderGrid();
+  window.scrollTo({ top: 0, behavior: prefersReducedMotion ? 'auto' : 'smooth' });
 }
 
 /* ============================================================
@@ -1382,6 +1409,7 @@ function initOrderDiscountUI() {
    EVENT LISTENERS
    ============================================================ */
 function initEvents() {
+  brandLogoBtn.addEventListener('click',  goHome);
   cartIconBtn.addEventListener('click',   openOrderDrawer);
   drawerClose.addEventListener('click',   closeAll);
   drawerBackdrop.addEventListener('click', closeAll);
