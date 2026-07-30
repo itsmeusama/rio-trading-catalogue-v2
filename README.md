@@ -6,7 +6,7 @@ A responsive static web catalogue for Rio Trading wholesale customers. The app l
 
 - Responsive product catalogue built with plain HTML, CSS, and JavaScript
 - Product data loaded from a published Google Sheets CSV
-- Demo product fallback when the live sheet cannot be loaded
+- Fail-closed catalogue loading with a clear retry state when the live sheet is unavailable or invalid
 - Search, category filters, and subcategory filters
 - Cart/order review drawer with quantity controls
 - Item-level discounts by percentage or fixed GBP amount
@@ -69,7 +69,7 @@ Update these values when changing the product sheet, EmailJS account, receiving 
 
 ## Product Data
 
-Products are loaded from the published Google Sheets CSV configured in `CONFIG.SHEET_CSV_URL`. If the sheet is unavailable or empty, the app falls back to the demo products in `script.js`.
+Products are loaded from the published Google Sheets CSV configured in `CONFIG.SHEET_CSV_URL`. Ordering stays disabled until a valid live catalogue has loaded. If the sheet is unavailable, empty, or malformed, the app displays a retryable error instead of substituting potentially incorrect products or prices.
 
 Expected sheet columns:
 

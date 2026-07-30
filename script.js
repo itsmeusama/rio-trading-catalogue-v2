@@ -22,29 +22,6 @@ const SUBCATEGORIES = {
   'Snacks': ['Biscuits', 'Cakes & Bakery', 'Crisps'],
 };
 
-/* ---- DEMO PRODUCTS ---- */
-/* Used when SHEET_CSV_URL is empty. Covers all 7 categories. */
-const DEMO_PRODUCTS = [
-  { id:'1',  name:'Tetley Tea Bags 240pk',          category:'Grocery & Essentials', subcategory:'English',        price:8.49,  unit:'case',  stock:'In Stock (240)' },
-  { id:'2',  name:'Basmati Rice 10kg',               category:'Grocery & Essentials', subcategory:'Asian',          price:14.99, unit:'sack',  stock:'In Stock (80)' },
-  { id:'3',  name:'Naan Bread x10',                  category:'Grocery & Essentials', subcategory:'Asian',          price:3.20,  unit:'pack',  stock:'In Stock (150)' },
-  { id:'4',  name:'Heinz Baked Beans 415g x24',      category:'Grocery & Essentials', subcategory:'English',        price:18.50, unit:'case',  stock:'In Stock (60)' },
-  { id:'5',  name:'Coca-Cola 330ml x24',             category:'Beverages',            subcategory:'',               price:12.99, unit:'case',  stock:'In Stock (200)' },
-  { id:'6',  name:'Lucozade Sport 500ml x12',        category:'Beverages',            subcategory:'',               price:9.60,  unit:'case',  stock:'In Stock (90)' },
-  { id:'7',  name:'Ribena Blackcurrant 1L x6',       category:'Beverages',            subcategory:'',               price:7.20,  unit:'case',  stock:'In Stock (120)' },
-  { id:'8',  name:'Cadbury Dairy Milk 200g x24',     category:'Confectionery',        subcategory:'',               price:22.80, unit:'case',  stock:'In Stock (48)' },
-  { id:'9',  name:'Haribo Starmix 160g x12',         category:'Confectionery',        subcategory:'',               price:10.44, unit:'case',  stock:'In Stock (72)' },
-  { id:'10', name:'Dove Body Wash 250ml x6',         category:'Health & Beauty',      subcategory:'',               price:11.40, unit:'case',  stock:'In Stock (36)' },
-  { id:'11', name:'Colgate Toothpaste 75ml x12',     category:'Health & Beauty',      subcategory:'',               price:14.88, unit:'case',  stock:'In Stock (60)' },
-  { id:'12', name:'Catering Foil 300m Roll',         category:'Catering',             subcategory:'',               price:6.50,  unit:'roll',  stock:'In Stock (40)' },
-  { id:'13', name:'Disposable Gloves M x100',        category:'Catering',             subcategory:'',               price:4.20,  unit:'box',   stock:'In Stock (200)' },
-  { id:'14', name:'Pedigree Dog Food 400g x12',      category:'Pet Food',             subcategory:'',               price:13.80, unit:'case',  stock:'In Stock (55)' },
-  { id:'15', name:'Whiskas Cat Food 400g x12',       category:'Pet Food',             subcategory:'',               price:12.60, unit:'case',  stock:'In Stock (48)' },
-  { id:'16', name:"McVitie's Digestives 400g x12",   category:'Snacks',               subcategory:'Biscuits',       price:14.40, unit:'case',  stock:'In Stock (96)' },
-  { id:'17', name:'Mr Kipling Exceedingly Cakes x6', category:'Snacks',               subcategory:'Cakes & Bakery', price:9.00,  unit:'case',  stock:'In Stock (72)' },
-  { id:'18', name:'Walkers Crisps Variety 24pk',     category:'Snacks',               subcategory:'Crisps',         price:11.52, unit:'case',  stock:'In Stock (100)' },
-];
-
 /* Image map — Unsplash URLs per product id */
 const PRODUCT_IMAGES = {
   '1':  'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400&q=80',
@@ -79,6 +56,8 @@ let activeCategory    = 'all';
 let activeSubcategory = 'all';
 let searchQuery       = '';
 let lastOrderData     = null;
+let catalogueState    = 'idle'; // idle | loading | ready | error
+let catalogueRequest  = 0;
 
 /* ============================================================
    DOM REFERENCES
@@ -111,6 +90,37 @@ const resultDrawerClose = document.getElementById('resultDrawerClose');
 const resultTitle       = document.getElementById('resultTitle');
 const resultBody        = document.getElementById('resultBody');
 const resultFooter      = document.getElementById('resultFooter');
+const catalogueMain     = document.getElementById('catalogueMain');
+const catalogueLoading  = document.getElementById('catalogueLoading');
+const catalogueError    = document.getElementById('catalogueError');
+const catalogueRetryBtn = document.getElementById('catalogueRetryBtn');
+
+/* ============================================================
+   CATALOGUE AVAILABILITY
+   ============================================================ */
+function setCatalogueState(nextState) {
+  catalogueState = nextState;
+  const ready   = nextState === 'ready';
+  const loading = nextState === 'loading';
+
+  catalogueMain.setAttribute('aria-busy', String(loading));
+  catalogueLoading.classList.toggle('hidden', !loading);
+  catalogueError.classList.toggle('hidden', nextState !== 'error');
+  productGrid.classList.toggle('hidden', !ready);
+  if (!ready) emptyState.classList.add('hidden');
+
+  searchInput.disabled  = !ready;
+  cartIconBtn.disabled  = !ready;
+  proceedBtn.disabled   = !ready || !hasValidCartItems();
+  sendOrderBtn.disabled = !ready;
+  categoryPills.querySelectorAll('.pill').forEach(btn => { btn.disabled = !ready; });
+  subcategoryPills.querySelectorAll('.pill').forEach(btn => { btn.disabled = !ready; });
+
+  if (!ready) {
+    cartPillTotal.textContent = '\u2014';
+    cartIconCount.classList.add('hidden');
+  }
+}
 
 /* ============================================================
    CART PERSISTENCE
@@ -142,16 +152,52 @@ function loadCart() {
 /* ============================================================
    CART CALCULATIONS
    ============================================================ */
+function getValidCartEntries() {
+  return Object.entries(cart).flatMap(([id, rawQty]) => {
+    const product = allProducts.find(p => p.id === id);
+    const qty = Number(rawQty);
+    return product && Number.isInteger(qty) && qty > 0 ? [{ product, qty }] : [];
+  });
+}
+
+function hasValidCartItems() {
+  return getValidCartEntries().length > 0;
+}
+
+function reconcileCartWithCatalogue() {
+  let changed = false;
+  const validProductIds = new Set(allProducts.map(product => product.id));
+
+  Object.entries(cart).forEach(([id, rawQty]) => {
+    const qty = Number(rawQty);
+    if (!validProductIds.has(id) || !Number.isInteger(qty) || qty < 1) {
+      delete cart[id];
+      delete discounts[id];
+      changed = true;
+    } else if (cart[id] !== qty) {
+      cart[id] = qty;
+      changed = true;
+    }
+  });
+
+  Object.keys(discounts).forEach(id => {
+    if (!Object.prototype.hasOwnProperty.call(cart, id)) {
+      delete discounts[id];
+      changed = true;
+    }
+  });
+
+  if (changed) saveCart();
+}
+
 function cartItemCount() {
-  return Object.values(cart).reduce((s, q) => s + q, 0);
+  return getValidCartEntries().reduce((sum, entry) => sum + entry.qty, 0);
 }
 
 function cartTotal() {
-  return Object.entries(cart).reduce((sum, [id, qty]) => {
-    const p = allProducts.find(x => x.id === id);
-    if (!p) return sum;
+  return getValidCartEntries().reduce((sum, { product: p, qty }) => {
     const sub = p.price * qty;
-    return sum + sub - getItemDiscountAmount(id, sub, p.price);
+    return sum + sub - getItemDiscountAmount(p.id, sub, p.price);
   }, 0);
 }
 
@@ -197,55 +243,105 @@ function generateOrderRef() {
    PRODUCT LOADING
    ============================================================ */
 async function loadProducts() {
+  const requestId = ++catalogueRequest;
+  setCatalogueState('loading');
+
   if (!CONFIG.SHEET_CSV_URL) {
-    allProducts = DEMO_PRODUCTS;
-    renderGrid();
-    updateCartUI();
+    console.error('Catalogue configuration error: SHEET_CSV_URL is missing.');
+    allProducts = [];
+    if (requestId === catalogueRequest) setCatalogueState('error');
     return;
   }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
   try {
-    const r = await fetch(CONFIG.SHEET_CSV_URL, { cache: 'no-store' });
+    const r = await fetch(CONFIG.SHEET_CSV_URL, { cache: 'no-store', signal: controller.signal });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const text = await r.text();
     const products = parseCSV(text);
     if (products.length === 0) throw new Error('Empty sheet');
+    if (requestId !== catalogueRequest) return;
     allProducts = products;
+    reconcileCartWithCatalogue();
+    setCatalogueState('ready');
     renderGrid();
     updateCartUI();
   } catch (err) {
-    console.warn('Sheet load failed, using demo data.', err);
-    allProducts = DEMO_PRODUCTS;
-    renderGrid();
-    updateCartUI();
+    if (requestId !== catalogueRequest) return;
+    console.error('Catalogue load failed.', err);
+    allProducts = [];
+    setCatalogueState('error');
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
 function parseCSV(text) {
-  /* Normalise line endings: Google Sheets uses \r\n */
-  const lines   = text.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/\r/g,''));
-  return lines.slice(1)
-    .filter(line => line.trim())
-    .map(line => {
-      /* Simple CSV split that handles quoted fields containing commas */
-      const vals = [];
-      let cur = '', inQ = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') { inQ = !inQ; }
-        else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = ''; }
-        else { cur += ch; }
-      }
-      vals.push(cur.trim());
-      const obj = {};
-      headers.forEach((h, i) => { obj[h] = (vals[i] || '').replace(/\r/g, ''); });
-      return { ...obj, price: parseFloat(obj.price) || 0, id: obj.id || String(Math.random()) };
-    })
-    .filter(p => {
-      /* Google Sheets exports TRUE/FALSE in uppercase; also handle lowercase and 0/1 */
-      const a = (p.active || 'true').toLowerCase().trim();
-      return a !== 'false' && a !== '0' && p.name;
-    });
+  const rows = parseCSVRows(text);
+  if (rows.length < 2) throw new Error('Catalogue has no product rows');
+
+  const headers = rows[0].map(h => h.replace(/^\uFEFF/, '').trim().toLowerCase());
+  const requiredHeaders = ['id', 'name', 'category', 'price'];
+  const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+  if (missingHeaders.length) throw new Error('Missing catalogue columns: ' + missingHeaders.join(', '));
+
+  const ids = new Set();
+  const products = [];
+
+  rows.slice(1).forEach((vals, rowIndex) => {
+    if (vals.every(v => !v.trim())) return;
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim(); });
+
+    /* Ignore a reserved ID row until actual product details are entered. */
+    const hasProductDetails = ['name', 'category', 'price', 'unit', 'stock', 'image', 'active']
+      .some(field => Boolean(obj[field]));
+    if (!hasProductDetails) return;
+
+    const activeValue = (obj.active || 'true').toLowerCase();
+    if (activeValue === 'false' || activeValue === '0') return;
+    if (!['true', '1', 'yes'].includes(activeValue)) {
+      throw new Error('Invalid active value on catalogue row ' + (rowIndex + 2));
+    }
+
+    const id = obj.id;
+    const price = Number(obj.price);
+    if (!id || !obj.name || !obj.category) throw new Error('Missing required value on catalogue row ' + (rowIndex + 2));
+    if (!Number.isFinite(price) || price <= 0) throw new Error('Invalid price on catalogue row ' + (rowIndex + 2));
+    if (ids.has(id)) throw new Error('Duplicate product ID: ' + id);
+
+    ids.add(id);
+    products.push({ ...obj, id, price });
+  });
+
+  return products;
+}
+
+/* CSV reader supporting commas, escaped quotes and line breaks in quoted cells. */
+function parseCSVRows(text) {
+  const rows = [];
+  let row = [], cell = '', inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') { cell += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === ',' && !inQuotes) {
+      row.push(cell); cell = '';
+    } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+
+  if (inQuotes) throw new Error('Unclosed quoted value in catalogue CSV');
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows;
 }
 
 /* ============================================================
@@ -405,6 +501,12 @@ function bounceCartIcon() {
 }
 
 function updateCartUI() {
+  if (catalogueState !== 'ready') {
+    cartPillTotal.textContent = '\u2014';
+    cartIconCount.classList.add('hidden');
+    return;
+  }
+
   const count = cartItemCount();
   const total = cartFinalTotal();
 
@@ -416,6 +518,8 @@ function updateCartUI() {
   } else {
     cartIconCount.classList.add('hidden');
   }
+
+  proceedBtn.disabled = count === 0;
 
   if (count > prevCartCount) bounceCartIcon();
   prevCartCount = count;
@@ -913,6 +1017,13 @@ function initLiveValidation() {
    ORDER SUBMISSION
    ============================================================ */
 async function submitOrder() {
+  const validCartEntries = getValidCartEntries();
+  if (validCartEntries.length === 0) {
+    formDrawer.classList.add('hidden');
+    openOrderDrawer();
+    return;
+  }
+
   if (!validateForm()) return;
 
   sendOrderBtn.disabled    = true;
@@ -927,12 +1038,10 @@ async function submitOrder() {
   const orderRef  = generateOrderRef();
   const orderDate = new Date().toLocaleString('en-GB', { dateStyle:'full', timeStyle:'short' });
 
-  const items = Object.entries(cart).map(([id, qty]) => {
-    const p = allProducts.find(x => x.id === id);
-    if (!p) return null;
+  const items = validCartEntries.map(({ product: p, qty }) => {
     const subtotal    = p.price * qty;
-    const discountAmt = getItemDiscountAmount(id, subtotal, p.price);
-    const d           = discounts[id];
+    const discountAmt = getItemDiscountAmount(p.id, subtotal, p.price);
+    const d           = discounts[p.id];
     return {
       name:          p.name,
       unit:          p.unit,
@@ -942,7 +1051,7 @@ async function submitOrder() {
       discountLabel: d && d.value ? formatDiscountLabel(d) : null,
       lineTotal:     subtotal - discountAmt,
     };
-  }).filter(Boolean);
+  });
 
   const subtotal        = cartTotal();
   const total           = cartFinalTotal();
@@ -1415,6 +1524,10 @@ function initEvents() {
   drawerBackdrop.addEventListener('click', closeAll);
 
   proceedBtn.addEventListener('click', () => {
+    if (!hasValidCartItems()) {
+      renderOrderDrawer();
+      return;
+    }
     orderDrawer.classList.add('hidden');
     openDrawer(formDrawer);
   });
@@ -1428,6 +1541,7 @@ function initEvents() {
 
   sendOrderBtn.addEventListener('click', submitOrder);
   resultDrawerClose.addEventListener('click', closeAll);
+  catalogueRetryBtn.addEventListener('click', loadProducts);
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeAll();

@@ -39,12 +39,12 @@
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
         <input type="search" id="searchInput" class="search-input" placeholder="Search products…"
-          aria-label="Search products" autocomplete="off" />
+          aria-label="Search products" autocomplete="off" disabled />
       </div>
 
       <!-- Cart pill button (top-right) -->
-      <button id="cartIconBtn" class="cart-pill-btn" aria-label="View order" title="View order">
-        <span id="cartPillTotal" class="cart-pill-total">£0.00</span>
+      <button id="cartIconBtn" class="cart-pill-btn" aria-label="View order" title="View order" disabled>
+        <span id="cartPillTotal" class="cart-pill-total">—</span>
         <span id="cartPillIcon" class="cart-pill-icon">
           <svg xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -81,14 +81,14 @@
     <div class="filters-inner">
       <!-- Category pills (scrollable row) -->
       <div class="category-pills" id="categoryPills" role="tablist" aria-label="Filter by category">
-        <button class="pill active" role="tab" data-cat="all">All</button>
-        <button class="pill" role="tab" data-cat="Grocery &amp; Essentials">Grocery &amp; Essentials</button>
-        <button class="pill" role="tab" data-cat="Beverages">Beverages</button>
-        <button class="pill" role="tab" data-cat="Confectionery">Confectionery</button>
-        <button class="pill" role="tab" data-cat="Health &amp; Beauty">Health &amp; Beauty</button>
-        <button class="pill" role="tab" data-cat="Catering">Catering</button>
-        <button class="pill" role="tab" data-cat="Pet Food">Pet Food</button>
-        <button class="pill" role="tab" data-cat="Snacks">Snacks</button>
+        <button class="pill active" role="tab" data-cat="all" disabled>All</button>
+        <button class="pill" role="tab" data-cat="Grocery &amp; Essentials" disabled>Grocery &amp; Essentials</button>
+        <button class="pill" role="tab" data-cat="Beverages" disabled>Beverages</button>
+        <button class="pill" role="tab" data-cat="Confectionery" disabled>Confectionery</button>
+        <button class="pill" role="tab" data-cat="Health &amp; Beauty" disabled>Health &amp; Beauty</button>
+        <button class="pill" role="tab" data-cat="Catering" disabled>Catering</button>
+        <button class="pill" role="tab" data-cat="Pet Food" disabled>Pet Food</button>
+        <button class="pill" role="tab" data-cat="Snacks" disabled>Snacks</button>
       </div>
 
       <!-- Subcategory pills row (hidden by default, shown when parent has subcats) -->
@@ -100,7 +100,30 @@
   <!-- ============================================================
        PRODUCT GRID
   ============================================================ -->
-  <main class="catalogue-main">
+  <main class="catalogue-main" id="catalogueMain" aria-busy="true">
+    <div class="catalogue-status" id="catalogueLoading" role="status" aria-live="polite">
+      <span class="catalogue-spinner" aria-hidden="true"></span>
+      <div>
+        <p>Loading latest catalogue…</p>
+        <span>Checking current products and prices</span>
+      </div>
+    </div>
+
+    <div class="catalogue-status catalogue-status-error hidden" id="catalogueError" role="alert">
+      <svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+        aria-hidden="true">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <div>
+        <p>Catalogue unavailable</p>
+        <span>We couldn’t load the latest products and prices. Check your connection and try again.</span>
+      </div>
+      <button class="btn btn-primary catalogue-retry-btn" id="catalogueRetryBtn" type="button">Try Again</button>
+    </div>
+
     <div class="product-grid" id="productGrid">
       <!-- Cards injected by JS -->
     </div>
@@ -181,7 +204,7 @@
         <span class="drawer-total-price" id="drawerTotal">£0.00</span>
       </div>
 
-      <button class="btn btn-primary btn-full" id="proceedBtn" aria-label="Proceed to send order">
+      <button class="btn btn-primary btn-full" id="proceedBtn" aria-label="Proceed to send order" disabled>
         Proceed to Send Order
       </button>
 

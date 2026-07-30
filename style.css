@@ -36,6 +36,7 @@ body {
 img { display: block; max-width: 100%; }
 button { font-family: inherit; cursor: pointer; border: none; background: none; }
 input, textarea { font-family: inherit; }
+button:disabled, input:disabled { cursor: not-allowed; }
 
 /* Utility */
 .hidden { display: none !important; }
@@ -72,6 +73,7 @@ input, textarea { font-family: inherit; }
 }
 .cart-pill-btn:hover  { background: var(--blue-dark); }
 .cart-pill-btn:active { transform: scale(0.97); }
+.cart-pill-btn:disabled { opacity: 0.55; transform: none; }
 .cart-pill-total { font-size: 14px; font-weight: 700; white-space: nowrap; }
 .cart-pill-icon {
   position: relative; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
@@ -196,6 +198,7 @@ input, textarea { font-family: inherit; }
 }
 .pill:hover  { border-color: var(--blue-light); color: var(--blue); }
 .pill.active { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+.pill:disabled { opacity: 0.55; pointer-events: none; }
 
 .subcategory-pills .pill {
   height: 28px; font-size: 12px;
@@ -207,6 +210,28 @@ input, textarea { font-family: inherit; }
    PRODUCT GRID
    ============================================================ */
 .catalogue-main { max-width: 1280px; margin: 0 auto; padding: 20px 16px; }
+
+.catalogue-status {
+  min-height: 260px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 48px 20px; text-align: center; color: var(--muted);
+}
+.catalogue-status > div { display: flex; flex-direction: column; gap: 5px; align-items: center; }
+.catalogue-status p { font-size: 16px; font-weight: 700; color: var(--text); }
+.catalogue-status span { max-width: 390px; font-size: 13px; line-height: 1.5; }
+.catalogue-spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid #DBEAFE; border-top-color: var(--blue);
+  animation: catalogueSpin 700ms linear infinite;
+}
+.catalogue-status-error { color: var(--error); }
+.catalogue-status-error > div > span { color: var(--muted); }
+.catalogue-retry-btn { margin-top: 4px; min-width: 120px; }
+@keyframes catalogueSpin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .catalogue-spinner { animation-duration: 1400ms; }
+}
 
 .product-grid {
   display: grid;
