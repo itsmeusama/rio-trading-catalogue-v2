@@ -1,16 +1,13 @@
 /* ============================================================
    Rio Trading — Wholesale Catalogue  |  script.js
-   All logic: data fetch, cart, rendering, EmailJS, PDF
+   All logic: catalogue, cart, Apps Script orders, PDF download
    ============================================================ */
 
 /* ---- CONFIG ---- */
-/* Edit these values to connect your live data and email service */
+/* Edit these values to connect the live catalogue and order service */
 const CONFIG = {
-  SHEET_CSV_URL:       'https://docs.google.com/spreadsheets/d/e/2PACX-1vQjfqRKuQx9rk4VZKrGOw7ANC3pMr71GkHsaJTYjPG9sFtIHtvZ6XSrLQIjukJK8A/pub?gid=1147224303&single=true&output=csv', // Google Sheets published CSV URL
-  EMAILJS_SERVICE_ID:  'rio_trading_order_email',
-  EMAILJS_TEMPLATE_ID: 'rio_trading_order_temp',
-  EMAILJS_PUBLIC_KEY:  'jZ5iYr62ozsXkXWpu',
-  ORDER_TO_EMAIL:      'orders@riotrading.co.uk',
+  SHEET_CSV_URL:       'https://docs.google.com/spreadsheets/d/e/2PACX-1vTHJ1bpsYx0uAhGPyX1y3gxb7Xrf6n-hGY6BQS6hhEUTNCx0aA3qBX2KZDdNaFSxDtjv8Oji4JqKlxU/pub?gid=1147224303&single=true&output=csv', // Google Sheets published CSV URL
+  ORDER_API_URL:       'https://script.google.com/macros/s/AKfycbzqdonNNlrbyAfF25CnGY4TdhXxstOgDp77PGeGLfaIe-0RHuXerbqpvweSfPwSNI7c/exec',
   BUSINESS_NAME:       'Rio Trading',
   BUSINESS_TAGLINE:    'Wholesale Catalogue',
 };
@@ -229,14 +226,13 @@ function fmt(n) {
   return '\u00A3' + n.toFixed(2);
 }
 
-/* ============================================================
-   ORDER REFERENCE
-   ============================================================ */
-function generateOrderRef() {
-  const d = new Date();
-  const date = d.toISOString().slice(0,10).replace(/-/g,'');
-  const rand = Math.random().toString(36).slice(2,7).toUpperCase();
-  return 'ORD-' + date + '-' + rand;
+function escapeHTML(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /* ============================================================
@@ -1027,7 +1023,7 @@ async function submitOrder() {
   if (!validateForm()) return;
 
   sendOrderBtn.disabled    = true;
-  sendOrderBtn.textContent = 'Sending\u2026';
+  sendOrderBtn.textContent = 'Saving order\u2026';
 
   const shopName    = document.getElementById('shopName').value.trim();
   const contactName = document.getElementById('contactName').value.trim();
@@ -1035,10 +1031,8 @@ async function submitOrder() {
   const email       = document.getElementById('email').value.trim();
   const notes       = document.getElementById('notes').value.trim();
 
-  const orderRef  = generateOrderRef();
-  const orderDate = new Date().toLocaleString('en-GB', { dateStyle:'full', timeStyle:'short' });
-
-  const items = validCartEntries.map(({ product: p, qty }) => {
+  const customer = { shopName, contactName, phone, email, notes };
+  const fallbackItems = validCartEntries.map(({ product: p, qty }) => {
     const subtotal    = p.price * qty;
     const discountAmt = getItemDiscountAmount(p.id, subtotal, p.price);
     const d           = discounts[p.id];
@@ -1053,69 +1047,58 @@ async function submitOrder() {
     };
   });
 
-  const subtotal        = cartTotal();
-  const total           = cartFinalTotal();
-  const orderDiscountAmt = subtotal - total;
-
-  const orderLines = [
-    '================================================',
-    'ORDERED ITEMS',
-    '================================================',
-    ...items.map((i, idx) =>
-      (idx + 1) + '. ' + i.name +
-      '\n   Unit: ' + (i.unit || '\u2014') +
-      ' | Qty: ' + i.qty +
-      ' | Unit Price: ' + fmt(i.unitPrice) +
-      (i.discountAmt > 0 ? ' | Discount: ' + i.discountLabel + ' (\u2212' + fmt(i.discountAmt) + ')' : '') +
-      ' | Line Total: ' + fmt(i.lineTotal)
-    ),
-    '------------------------------------------------',
-    'ORDER SUBTOTAL: ' + fmt(subtotal),
-    ...(orderDiscountAmt > 0 ? ['ORDER DISCOUNT (' + orderDiscountPct + '%): \u2212' + fmt(orderDiscountAmt)] : []),
-    'ORDER TOTAL: ' + fmt(total),
-    '================================================',
-  ].join('\n');
-
-  const orderData = { orderRef, orderDate, shopName, contactName, phone, email, notes, items, subtotal, total, orderDiscountPct, orderDiscountAmt, orderLines };
-  lastOrderData   = orderData;
-
-  const emailjsOk =
-    CONFIG.EMAILJS_SERVICE_ID  !== 'YOUR_SERVICE_ID'  &&
-    CONFIG.EMAILJS_TEMPLATE_ID !== 'YOUR_TEMPLATE_ID' &&
-    CONFIG.EMAILJS_PUBLIC_KEY  !== 'YOUR_PUBLIC_KEY';
-
-  if (!emailjsOk) {
-    /* Demo mode — simulate delay */
-    await new Promise(r => setTimeout(r, 1200));
-    resetSendBtn();
-    showResult('success', orderData, 'EmailJS not configured \u2014 running in demo mode. Order was not actually sent.');
-    return;
-  }
-
   try {
-    /* Generate PDF as base64 for email attachment */
-    const pdfDoc     = buildPDF(orderData);
-    const pdfBase64  = pdfDoc.output('datauristring'); // data:application/pdf;base64,...
+    if (!window.RioOrderApi) throw new Error('The order service client did not load.');
 
-    emailjs.init(CONFIG.EMAILJS_PUBLIC_KEY);
-    await emailjs.send(CONFIG.EMAILJS_SERVICE_ID, CONFIG.EMAILJS_TEMPLATE_ID, {
-      to_email:        CONFIG.ORDER_TO_EMAIL,
-      order_ref:       orderRef,
-      order_date:      orderDate,
-      shop_name:       shopName,
-      contact_name:    contactName,
-      phone,
-      email,
-      order_lines:     orderLines,
-      order_total:     fmt(total),
-      notes:           notes || 'None',
+    const requestWithoutId = {
+      contractVersion: 1,
+      customer,
+      items: validCartEntries
+        .map(({ product, qty }) => ({
+          productId: product.id,
+          quantity: qty,
+          discount: discounts[product.id] && discounts[product.id].value
+            ? {
+                mode: discounts[product.id].mode,
+                value: Number(discounts[product.id].value),
+              }
+            : null,
+        }))
+        .sort((a, b) => a.productId.localeCompare(b.productId, undefined, { numeric: true })),
+      orderDiscountPct: Number(orderDiscountPct) || 0,
+    };
+    const fingerprint = await RioOrderApi.fingerprintPayload(requestWithoutId);
+    const submissionId = RioOrderApi.getOrCreateSubmissionId(fingerprint, localStorage);
+    const response = await RioOrderApi.postOrder(CONFIG.ORDER_API_URL, {
+      contractVersion: requestWithoutId.contractVersion,
+      submissionId,
+      customer: requestWithoutId.customer,
+      items: requestWithoutId.items,
+      orderDiscountPct: requestWithoutId.orderDiscountPct,
     });
+
+    const orderData = RioOrderApi.toOrderData(response, customer, fallbackItems);
+    lastOrderData = orderData;
+
+    const messages = [];
+    if (response.duplicate) {
+      messages.push('This retry matched the order already saved under the same reference. No duplicate was created.');
+    }
+    if (response.emailStatus === 'Failed') {
+      messages.push('The order is safely saved, but its owner email could not be sent. Check the Orders sheet for the permanent record.');
+    } else if (response.emailStatus === 'Pending') {
+      messages.push('The order is safely saved and its email is still being processed.');
+    }
+
     resetSendBtn();
-    showResult('success', orderData);
+    showResult('success', orderData, messages.join(' '));
   } catch (err) {
-    console.error('EmailJS error:', err);
+    console.error('Order service error:', err);
+    if (err && err.response && err.response.saved === false && window.RioOrderApi) {
+      RioOrderApi.clearSubmission(localStorage);
+    }
     resetSendBtn();
-    showResult('error', orderData, err.text || err.message || 'Unknown error');
+    showResult('error', null, err && err.message ? err.message : 'Unknown order service error');
   }
 }
 
@@ -1132,6 +1115,9 @@ function showResult(type, orderData, detail) {
   resultDrawer.classList.remove('hidden');
 
   if (type === 'success') {
+    const safeRef    = escapeHTML(orderData.orderRef);
+    const safeShop   = escapeHTML(orderData.shopName);
+    const safeDetail = escapeHTML(detail);
     resultTitle.textContent = 'Order Submitted';
     resultBody.innerHTML = `
       <div class="result-icon success">
@@ -1141,9 +1127,9 @@ function showResult(type, orderData, detail) {
         </svg>
       </div>
       <div class="result-heading">Order Submitted Successfully!</div>
-      <div class="result-ref">Order #${orderData.orderRef}</div>
-      <div class="result-msg">Thank you for your order, ${orderData.shopName}. We\u2019ll be in touch shortly to confirm your delivery.</div>
-      ${detail ? '<div class="result-error-detail">\u2139\uFE0F ' + detail + '</div>' : ''}`;
+      <div class="result-ref">Order #${safeRef}</div>
+      <div class="result-msg">Thank you for your order, ${safeShop}. We\u2019ll be in touch shortly to confirm your delivery.</div>
+      ${detail ? '<div class="result-error-detail">\u2139\uFE0F ' + safeDetail + '</div>' : ''}`;
 
     resultFooter.innerHTML = `
       <div style="display:flex;gap:10px;flex-direction:column;">
@@ -1162,6 +1148,7 @@ function showResult(type, orderData, detail) {
     document.getElementById('placeAnotherBtn').addEventListener('click', placeAnotherOrder);
 
   } else {
+    const safeDetail = escapeHTML(detail);
     resultTitle.textContent = 'Submission Failed';
     resultBody.innerHTML = `
       <div class="result-icon error">
@@ -1173,8 +1160,8 @@ function showResult(type, orderData, detail) {
         </svg>
       </div>
       <div class="result-heading">Order Submission Failed</div>
-      <div class="result-msg">We couldn\u2019t send your order. Please try again or contact us directly.</div>
-      ${detail ? '<div class="result-error-detail">Error: ' + detail + '</div>' : ''}`;
+      <div class="result-msg">We couldn\u2019t submit your order. Please review the message below and try again.</div>
+      ${detail ? '<div class="result-error-detail">Error: ' + safeDetail + '</div>' : ''}`;
 
     resultFooter.innerHTML = `
       <div style="display:flex;gap:10px;flex-direction:column;">
@@ -1197,6 +1184,7 @@ function placeAnotherOrder() {
   cart             = {};
   discounts        = {};
   orderDiscountPct = 0;
+  if (window.RioOrderApi) RioOrderApi.clearSubmission(localStorage);
   const discInput  = document.getElementById('orderDiscInput');
   const discPanel  = document.getElementById('orderDiscPanel');
   const discAddBtn = document.getElementById('orderDiscAddBtn');
