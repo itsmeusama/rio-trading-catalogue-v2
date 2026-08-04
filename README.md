@@ -12,7 +12,10 @@ A responsive static web catalogue for Rio Trading wholesale customers. The app l
 - Item-level discounts by percentage or fixed GBP amount
 - Order-level percentage discount
 - Customer details form with basic validation
-- EmailJS order submission
+- Permanent order storage through the Apps Script web app
+- Server-authoritative product prices and totals
+- Duplicate-safe submission retries
+- Owner email with a server-generated PDF attachment
 - jsPDF and AutoTable PDF generation
 - Cart persistence through `localStorage`
 - Promo banner slider using images from the `assets/` folder
@@ -25,9 +28,21 @@ A responsive static web catalogue for Rio Trading wholesale customers. The app l
 │   ├── Banner.JPG
 │   ├── banner1.png
 │   └── rio-trading-logo.jpg
+├── docs/
+│   └── order-system-phase-1.md
+├── apps-script/
+│   ├── Code.gs
+│   ├── Phase2Test.gs
+│   ├── Phase3Test.gs
+│   ├── appsscript.json
+│   ├── README.md
+│   └── PHASE-3.md
 ├── index.html
+├── order-api.js
 ├── script.js
 ├── style.css
+├── tests/
+│   └── order-api.test.js
 └── README.md
 ```
 
@@ -55,17 +70,16 @@ Runtime configuration lives at the top of `script.js` in the `CONFIG` object.
 
 ```js
 const CONFIG = {
-  SHEET_CSV_URL:       '...',
-  EMAILJS_SERVICE_ID:  '...',
-  EMAILJS_TEMPLATE_ID: '...',
-  EMAILJS_PUBLIC_KEY:  '...',
-  ORDER_TO_EMAIL:      'orders@riotrading.co.uk',
-  BUSINESS_NAME:       'Rio Trading',
-  BUSINESS_TAGLINE:    'Wholesale Catalogue',
+  SHEET_CSV_URL:  '...',
+  ORDER_API_URL:  'https://script.google.com/macros/s/.../exec',
+  BUSINESS_NAME:  'Rio Trading',
+  BUSINESS_TAGLINE: 'Wholesale Catalogue',
 };
 ```
 
-Update these values when changing the product sheet, EmailJS account, receiving order email, or business display details.
+Update these values when changing the product sheet, Apps Script deployment,
+or business display details. The owner recipient is fixed server-side and is
+never accepted from the browser.
 
 ## Product Data
 
@@ -93,15 +107,27 @@ The current subcategory mapping is configured in `SUBCATEGORIES` inside `script.
 2. Customers add quantities to the order.
 3. The order drawer shows line totals, discounts, subtotal, and final payable total.
 4. Customers enter shop name, contact name, phone number, email address, and optional notes.
-5. The app submits the order through EmailJS.
-6. Customers can download a PDF order summary.
+5. The app submits product IDs, quantities, discounts and customer details to Apps Script.
+6. Apps Script reloads authoritative products and prices, saves the order, sends the owner PDF email and returns the permanent reference.
+7. The salesperson can download a PDF order summary using the saved response.
+
+## Permanent Order Backend
+
+The approved Phase 1 specification for permanent Google Sheets order storage,
+Apps Script validation, duplicate protection, and PDF email delivery is in
+[`docs/order-system-phase-1.md`](docs/order-system-phase-1.md).
+
+The Phase 2 Apps Script persistence implementation and its setup instructions
+are in [`apps-script/README.md`](apps-script/README.md).
+
+The Phase 3 save-first PDF/email upgrade, deployment and end-to-end acceptance
+test are in [`apps-script/PHASE-3.md`](apps-script/PHASE-3.md).
 
 ## External Services and CDNs
 
 The app uses these browser-loaded services/libraries:
 
 - Google Fonts for the Inter font family
-- EmailJS browser SDK for order emails
 - jsPDF for PDF creation
 - jsPDF AutoTable for PDF table formatting
 - Google Sheets published CSV as the product data source
@@ -119,4 +145,6 @@ Make sure `index.html`, `style.css`, `script.js`, and the `assets/` folder are d
 - If new subcategories are required, update `SUBCATEGORIES` in `script.js`.
 - Promo banners are defined in `index.html` inside `#promoSliderTrack`.
 - Cart data is stored in the browser under the `rioTradingCart` localStorage key.
-- The app is client-side only, so EmailJS public keys and sheet URLs are visible in the browser.
+- The catalogue and Apps Script endpoint URLs are visible in the browser. The
+  backend therefore fixes the recipient server-side and revalidates every
+  commercial value before saving.
