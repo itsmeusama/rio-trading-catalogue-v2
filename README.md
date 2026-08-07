@@ -109,7 +109,7 @@ The current subcategory mapping is configured in `SUBCATEGORIES` inside `script.
 4. Customers enter shop name, contact name, phone number, email address, and optional notes.
 5. The app submits product IDs, quantities, discounts and customer details to Apps Script.
 6. Apps Script reloads authoritative products and prices, saves the order, sends the owner PDF email and returns the permanent reference.
-7. The salesperson can download a PDF order summary using the saved response.
+7. The salesperson can download an Order Confirmation PDF using the saved response.
 
 ## Permanent Order Backend
 
