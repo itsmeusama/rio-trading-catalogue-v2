@@ -256,7 +256,10 @@ function run() {
   assert.equal(sent.status, 'Sent');
   assert.equal(sentMessages.length, 1);
   assert.equal(sentMessages[0][0], 'riotraders87@gmail.com');
-  assert.equal(sentMessages[0][3].attachments[0].name, 'Rio-Trading-Order-ORD-20260802-ABCDE.pdf');
+  assert.equal(
+    sentMessages[0][3].attachments[0].name,
+    'Rio-Trading-Order-Confirmation-ORD-20260802-ABCDE.pdf'
+  );
   assert.equal(deliveryOrderValues[17], 'Sent');
 
   const alreadySent = context.deliverSavedOrderEmail_(deliverySheets, accepted.orderRef);

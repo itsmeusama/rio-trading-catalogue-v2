@@ -1139,7 +1139,7 @@ function showResult(type, orderData, detail) {
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
-          Download PDF Receipt
+          Download Order Confirmation
         </button>
         <button class="btn btn-outline btn-full" id="placeAnotherBtn">Place Another Order</button>
       </div>`;
@@ -1232,7 +1232,7 @@ function buildPDF(d) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(80, 80, 80);
-  doc.text('ORDER RECEIPT', W - M, y + 4, { align: 'right' });
+  doc.text('ORDER CONFIRMATION', W - M, y + 4, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -1453,7 +1453,7 @@ function buildPDF(d) {
 }
 
 function downloadPDF(d) {
-  buildPDF(d).save('Order-' + d.orderRef + '.pdf');
+  buildPDF(d).save('Rio-Trading-Order-Confirmation-' + d.orderRef + '.pdf');
 }
 
 /* ============================================================

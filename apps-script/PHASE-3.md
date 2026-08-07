@@ -50,8 +50,8 @@ This test sends one real email to the fixed owner address.
 4. Confirm `Order Items` contains two rows with the same `order_ref`.
 5. In the `riotraders87@gmail.com` inbox, open the message whose subject starts
    `New Rio Trading Order`.
-6. Confirm it contains the order summary and exactly one PDF attachment named
-   `Rio-Trading-Order-ORD-....pdf`.
+6. Confirm it contains the order confirmation and exactly one PDF attachment named
+   `Rio-Trading-Order-Confirmation-ORD-....pdf`.
 7. Open the PDF and visually verify:
    - the Rio Trading heading, order reference and date are readable;
    - customer details and notes are complete;
@@ -92,7 +92,7 @@ deployment:
 
 The `/exec` URL remains the same. Publishing a new version is required because
 the final response now includes the authoritative saved line items used by the
-browser's downloadable receipt.
+browser's downloadable Order Confirmation.
 
 The frontend now posts through `order-api.js`; EmailJS and its browser SDK have
 been removed. An unchanged uncertain retry reuses its submission UUID. If the

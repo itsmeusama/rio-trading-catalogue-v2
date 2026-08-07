@@ -790,7 +790,7 @@ function loadSavedOrder_(sheets, existingOrder) {
 
 function createOrderPdf_(order) {
   var html = buildOrderDocumentHtml_(order, true);
-  var fileName = 'Rio-Trading-Order-' + order.orderRef + '.pdf';
+  var fileName = 'Rio-Trading-Order-Confirmation-' + order.orderRef + '.pdf';
   return Utilities
     .newBlob(html, 'text/html', fileName.replace(/\.pdf$/, '.html'))
     .getAs(MimeType.PDF)
