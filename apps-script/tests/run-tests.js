@@ -96,6 +96,68 @@ function run() {
     }
   );
 
+  assert.equal(context.safeSheetText_('Corner Shop Ltd'), 'Corner Shop Ltd');
+  assert.equal(context.safeSheetText_(''), '');
+  assert.equal(context.safeSheetText_("'=1+1"), "'=1+1");
+  assert.equal(context.safeSheetText_('=1+1'), "'=1+1");
+  assert.equal(context.safeSheetText_('+447700900123'), "'+447700900123");
+  assert.equal(context.safeSheetText_('-10'), "'-10");
+  assert.equal(context.safeSheetText_('@example'), "'@example");
+
+  const formulaPayload = validPayload();
+  formulaPayload.customer = {
+    shopName: '=1+1',
+    contactName: '@contact',
+    phone: '+447700900123',
+    email: 'orders@cornershop.example',
+    notes: '=HYPERLINK("https://example.invalid","Open")',
+  };
+  const formulaRequest = context.validateOrderRequest_(formulaPayload);
+  const formulaOrderRow = context.buildOrderRow_(
+    'ORD-20260802-SAFE1',
+    new Date('2026-08-02T12:00:00Z'),
+    formulaRequest,
+    calculated
+  );
+  assert.equal(formulaOrderRow[3], "'=1+1");
+  assert.equal(formulaOrderRow[4], "'@contact");
+  assert.equal(formulaOrderRow[5], "'+447700900123");
+  assert.equal(formulaOrderRow[6], 'orders@cornershop.example');
+  assert.equal(formulaOrderRow[7], "'=HYPERLINK(\"https://example.invalid\",\"Open\")");
+  assert.equal(formulaRequest.customer.shopName, '=1+1', 'sanitising persistence must not mutate customer data');
+  assert.equal(formulaRequest.customer.phone, '+447700900123', 'valid +44 phone numbers must remain intact');
+
+  let writtenFormulaOrderRow = null;
+  let writtenFormulaItemRows = null;
+  context.SpreadsheetApp = { flush() {} };
+  const formulaSheets = {
+    orders: {
+      getLastRow: () => 1,
+      getRange: () => ({
+        setValues(values) { writtenFormulaOrderRow = values[0].slice(); },
+        clearContent() {},
+      }),
+    },
+    orderItems: {
+      getLastRow: () => 1,
+      getRange: () => ({
+        setValues(values) { writtenFormulaItemRows = values.map(row => row.slice()); },
+        clearContent() {},
+      }),
+    },
+  };
+  context.persistOrder_(
+    formulaSheets,
+    'ORD-20260802-SAFE1',
+    new Date('2026-08-02T12:00:00Z'),
+    formulaRequest,
+    calculated
+  );
+  assert.equal(writtenFormulaOrderRow[3], "'=1+1", 'the persistence path must write formula-like text literally');
+  assert.equal(writtenFormulaOrderRow[5], "'+447700900123", 'the persistence path must preserve +44 phone text');
+  assert.equal(writtenFormulaOrderRow[7], "'=HYPERLINK(\"https://example.invalid\",\"Open\")");
+  assert.equal(writtenFormulaItemRows.length, calculated.lines.length, 'formula protection must not alter order lines');
+
   const duplicateLinePayload = validPayload();
   duplicateLinePayload.items.push({ productId: '1', quantity: 1, discount: null });
   expectPublicError('INVALID_ITEM', () => context.validateOrderRequest_(duplicateLinePayload));
@@ -273,7 +335,7 @@ function run() {
   assert.equal(deliveryOrderValues[17], 'Failed');
   assert.match(String(deliveryOrderValues[19]), /Test delivery failure/);
 
-  console.log('Phase 3 tests passed: persistence, duplicate safety, PDF HTML and email status handling.');
+  console.log('Phase 3 tests passed: persistence, formula safety, duplicate safety, PDF HTML and email status handling.');
 }
 
 run();

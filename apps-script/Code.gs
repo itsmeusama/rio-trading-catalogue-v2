@@ -504,11 +504,11 @@ function buildOrderRow_(orderRef, createdAt, request, order) {
     orderRef,
     request.submissionId,
     createdAt,
-    request.customer.shopName,
-    request.customer.contactName,
-    request.customer.phone,
-    request.customer.email,
-    request.customer.notes,
+    safeSheetText_(request.customer.shopName),
+    safeSheetText_(request.customer.contactName),
+    safeSheetText_(request.customer.phone),
+    safeSheetText_(request.customer.email),
+    safeSheetText_(request.customer.notes),
     ORDER_SYSTEM.CURRENCY,
     order.itemCount,
     fromPence_(order.grossSubtotalPence),
@@ -933,6 +933,11 @@ function htmlEscape_(value) {
 
 function htmlText_(value) {
   return htmlEscape_(value).replace(/\r?\n/g, '<br>');
+}
+
+function safeSheetText_(value) {
+  var text = String(value === undefined || value === null ? '' : value);
+  return /^[=+\-@]/.test(text) ? "'" + text : text;
 }
 
 function safeErrorMessage_(error) {
