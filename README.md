@@ -14,6 +14,7 @@ A responsive static web catalogue for Rio Trading wholesale customers. The app l
 - Customer details form with basic validation
 - Permanent order storage through the Apps Script web app
 - Server-authoritative product prices and totals
+- Matching integer-pence calculations in the browser and Apps Script
 - Duplicate-safe submission retries
 - Owner email with a server-generated PDF attachment
 - jsPDF and AutoTable PDF generation
@@ -38,10 +39,12 @@ A responsive static web catalogue for Rio Trading wholesale customers. The app l
 │   ├── README.md
 │   └── PHASE-3.md
 ├── index.html
+├── money.js
 ├── order-api.js
 ├── script.js
 ├── style.css
 ├── tests/
+│   ├── money.test.js
 │   └── order-api.test.js
 └── README.md
 ```
@@ -137,7 +140,7 @@ The app uses these browser-loaded services/libraries:
 
 Because this is a static site, it can be deployed to any static hosting provider, including GitHub Pages, Netlify, Vercel, Cloudflare Pages, or a standard web server.
 
-Make sure `index.html`, `style.css`, `script.js`, and the `assets/` folder are deployed together.
+Make sure `index.html`, `style.css`, `money.js`, `order-api.js`, `script.js`, and the `assets/` folder are deployed together.
 
 ## Development Notes
 

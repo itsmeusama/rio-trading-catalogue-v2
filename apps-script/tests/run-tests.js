@@ -13,6 +13,8 @@ const manualTestPath = path.join(__dirname, '..', 'Phase2Test.gs');
 const manualTestSource = fs.readFileSync(manualTestPath, 'utf8');
 const phase3TestPath = path.join(__dirname, '..', 'Phase3Test.gs');
 const phase3TestSource = fs.readFileSync(phase3TestPath, 'utf8');
+const moneyPath = path.join(__dirname, '..', '..', 'money.js');
+const moneySource = fs.readFileSync(moneyPath, 'utf8');
 
 const context = vm.createContext({
   console,
@@ -34,6 +36,7 @@ const context = vm.createContext({
 });
 
 new vm.Script(source + '\n' + manualTestSource + '\n' + phase3TestSource, { filename: codePath }).runInContext(context);
+new vm.Script(moneySource, { filename: moneyPath }).runInContext(context);
 
 function productRows() {
   return [
@@ -41,6 +44,7 @@ function productRows() {
     ['1', 'Tetley Tea Bags', 'Grocery & Essentials', 'English', 10, 'case', 'In Stock (10)', '', true],
     ['5', 'Coca-Cola 330ml', 'Beverages', '', 12.99, 'case', 'In Stock (200)', '', true],
     ['17', 'Inactive Cake', 'Snacks', 'Cakes & Bakery', 9, 'case', 'In Stock (72)', '', false],
+    ['20', 'Tetley Decaf Tea Bags 80pk', 'Grocery & Essentials', 'English', 2.49, 'case', 'In Stock (20)', '', true],
     ['23', '', '', '', '', '', '', '', ''],
   ];
 }
@@ -68,10 +72,43 @@ function expectPublicError(code, fn) {
   assert.throws(fn, error => error && error.publicCode === code);
 }
 
+function assertMoneyParity(price, quantity, discount, orderDiscountPct) {
+  const product = {
+    id: 'parity-product',
+    name: 'Parity Product',
+    category: 'Test',
+    unit: 'case',
+    unitPricePence: context.toPence_(price),
+    active: true,
+  };
+  const request = {
+    items: [{ productId: product.id, quantity, discount }],
+    orderDiscountPct,
+  };
+  const backend = context.calculateOrder_(request, { [product.id]: product });
+  const frontendLine = context.RioMoney.calculateLine(
+    product.unitPricePence,
+    quantity,
+    discount
+  );
+  const frontend = context.RioMoney.calculateOrder([frontendLine], orderDiscountPct);
+  const label = JSON.stringify({ price, quantity, discount, orderDiscountPct });
+
+  [
+    'grossSubtotalPence',
+    'itemDiscountPence',
+    'subtotalPence',
+    'orderDiscountPence',
+    'totalPence',
+  ].forEach(field => {
+    assert.equal(frontend[field], backend[field], `${field} mismatch for ${label}`);
+  });
+}
+
 function run() {
   const realDeliverSavedOrderEmail = context.deliverSavedOrderEmail_;
   const catalogue = context.buildProductCatalogue_(productRows());
-  assert.equal(Object.keys(catalogue).length, 3, 'ID-only rows must be ignored');
+  assert.equal(Object.keys(catalogue).length, 4, 'ID-only rows must be ignored');
   assert.equal(catalogue['1'].unitPricePence, 1000);
   assert.equal(catalogue['17'].active, false);
 
@@ -95,6 +132,67 @@ function run() {
       itemCount: 3,
     }
   );
+
+  const parityPayload = validPayload();
+  parityPayload.items = [
+    { productId: '20', quantity: 1, discount: { mode: 'pct', value: 50 } },
+    { productId: '5', quantity: 3, discount: { mode: 'fixed', value: 2 } },
+  ];
+  parityPayload.orderDiscountPct = 5;
+  const parityRequest = context.validateOrderRequest_(parityPayload);
+  const backendParity = context.calculateOrder_(parityRequest, catalogue);
+  const frontendLines = parityRequest.items.map(item => context.RioMoney.calculateLine(
+    catalogue[item.productId].unitPricePence,
+    item.quantity,
+    item.discount
+  ));
+  const frontendParity = context.RioMoney.calculateOrder(frontendLines, parityRequest.orderDiscountPct);
+  assert.deepEqual(
+    {
+      grossSubtotalPence: frontendParity.grossSubtotalPence,
+      itemDiscountPence: frontendParity.itemDiscountPence,
+      subtotalPence: frontendParity.subtotalPence,
+      orderDiscountPence: frontendParity.orderDiscountPence,
+      totalPence: frontendParity.totalPence,
+    },
+    {
+      grossSubtotalPence: backendParity.grossSubtotalPence,
+      itemDiscountPence: backendParity.itemDiscountPence,
+      subtotalPence: backendParity.subtotalPence,
+      orderDiscountPence: backendParity.orderDiscountPence,
+      totalPence: backendParity.totalPence,
+    },
+    'frontend and backend must use identical penny-rounding rules'
+  );
+  assert.equal(frontendParity.totalPence, 3250);
+
+  const cataloguePrices = [
+    1.1, 2.49, 3.2, 5.5, 6.5, 9, 9.6, 10, 10.44,
+    11.4, 11.52, 12.6, 12.99, 13.8, 14.88, 18.5, 20, 22.8,
+  ];
+  const quantities = [1, 2, 3, 10];
+  const percentages = [5, 12.5, 15, 33.33, 50, 100];
+  const orderPercentages = [0, 5, 17.5, 50, 100];
+  let parityCaseCount = 0;
+
+  cataloguePrices.forEach(price => {
+    quantities.forEach(quantity => {
+      orderPercentages.forEach(orderPct => {
+        assertMoneyParity(price, quantity, null, orderPct);
+        parityCaseCount++;
+        percentages.forEach(percentage => {
+          assertMoneyParity(price, quantity, { mode: 'pct', value: percentage }, orderPct);
+          parityCaseCount++;
+        });
+      });
+
+      [0.01, 0.1, 1, 1.235, 2.49].filter(value => value <= price).forEach(value => {
+        assertMoneyParity(price, quantity, { mode: 'fixed', value }, 5);
+        parityCaseCount++;
+      });
+    });
+  });
+  assert.equal(parityCaseCount, 2872, 'the rounding parity matrix must remain comprehensive');
 
   assert.equal(context.safeSheetText_('Corner Shop Ltd'), 'Corner Shop Ltd');
   assert.equal(context.safeSheetText_(''), '');
@@ -335,7 +433,7 @@ function run() {
   assert.equal(deliveryOrderValues[17], 'Failed');
   assert.match(String(deliveryOrderValues[19]), /Test delivery failure/);
 
-  console.log('Phase 3 tests passed: persistence, formula safety, duplicate safety, PDF HTML and email status handling.');
+  console.log('Phase 3 tests passed: calculation parity, persistence, formula safety, duplicate safety, PDF HTML and email status handling.');
 }
 
 run();
