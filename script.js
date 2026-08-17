@@ -191,39 +191,41 @@ function cartItemCount() {
   return getValidCartEntries().reduce((sum, entry) => sum + entry.qty, 0);
 }
 
-function cartTotal() {
-  return getValidCartEntries().reduce((sum, { product: p, qty }) => {
-    const sub = p.price * qty;
-    return sum + sub - getItemDiscountAmount(p.id, sub, p.price);
-  }, 0);
+function calculateCartLine(product, quantity) {
+  return RioMoney.calculateLine(
+    product.pricePence,
+    quantity,
+    discounts[product.id]
+  );
 }
 
-function cartFinalTotal() {
-  const sub = cartTotal();
-  if (!orderDiscountPct) return sub;
-  return sub - sub * Math.min(100, Math.max(0, orderDiscountPct)) / 100;
-}
-
-function getItemDiscountAmount(productId, subtotal, unitPrice) {
-  const d = discounts[productId];
-  if (!d || !d.value) return 0;
-  if (d.mode === 'pct') return subtotal * Math.min(100, Math.max(0, d.value)) / 100;
-  /* fixed: discount is per unit — clamp to unit price, then multiply by qty */
-  const discPerUnit = Math.min(unitPrice, Math.max(0, d.value));
-  const qty = unitPrice > 0 ? Math.round(subtotal / unitPrice) : 1;
-  return discPerUnit * qty;
+function calculateCartTotals() {
+  const lines = getValidCartEntries().map(({ product, qty }) =>
+    calculateCartLine(product, qty)
+  );
+  return RioMoney.calculateOrder(lines, orderDiscountPct);
 }
 
 function formatDiscountLabel(d) {
   if (!d || !d.value) return '+ Discount';
   return d.mode === 'pct'
     ? d.value + '% off'
-    : '£' + Number(d.value).toFixed(2) + ' off';
+    : RioMoney.formatPence(RioMoney.toPence(d.value)) + ' off';
 }
 
 /* Format a number as GBP */
 function fmt(n) {
-  return '\u00A3' + n.toFixed(2);
+  return RioMoney.formatPence(RioMoney.toPence(n));
+}
+
+function fmtPence(pence) {
+  return RioMoney.formatPence(pence);
+}
+
+function formatDiscountedUnit(line) {
+  const exactUnitPence = line.lineTotalPence / line.quantity;
+  const approximate = !Number.isInteger(exactUnitPence);
+  return (approximate ? '\u2248 ' : '') + fmtPence(Math.round(exactUnitPence));
 }
 
 function escapeHTML(value) {
@@ -309,7 +311,7 @@ function parseCSV(text) {
     if (ids.has(id)) throw new Error('Duplicate product ID: ' + id);
 
     ids.add(id);
-    products.push({ ...obj, id, price });
+    products.push({ ...obj, id, price, pricePence: RioMoney.toPence(price) });
   });
 
   return products;
@@ -388,7 +390,7 @@ function buildCard(product) {
     </div>
     <div class="card-body">
       <div class="card-name">${product.name}</div>
-      <div class="card-price">${fmt(product.price)}</div>
+      <div class="card-price">${fmtPence(product.pricePence)}</div>
       <div class="card-unit">per ${product.unit || 'unit'}</div>
       <div class="card-stock">${product.stock || 'In Stock'}</div>
     </div>
@@ -504,9 +506,9 @@ function updateCartUI() {
   }
 
   const count = cartItemCount();
-  const total = cartFinalTotal();
+  const total = calculateCartTotals().totalPence;
 
-  cartPillTotal.textContent = fmt(total);
+  cartPillTotal.textContent = fmtPence(total);
 
   if (count > 0) {
     cartIconCount.textContent = count;
@@ -570,15 +572,14 @@ function buildCartRow(product, qty) {
   /* ---- Product row ---- */
   const row = document.createElement('div');
   row.className = 'cart-item';
-  const sub0 = product.price * qty;
-  const disc0 = getItemDiscountAmount(product.id, sub0, product.price);
+  const line0 = calculateCartLine(product, qty);
   row.innerHTML = `
     <img class="cart-item-img" src="${getImg(product)}" alt="${product.name}" loading="lazy"
       onerror="this.src='${FALLBACK_IMG}'" />
     <div class="cart-item-info">
       <div class="cart-item-name">${product.name}</div>
       <div class="cart-item-price-line">
-        <span class="cart-item-orig-price">${fmt(product.price)}</span>
+        <span class="cart-item-orig-price">${fmtPence(product.pricePence)}</span>
         <span class="cart-item-disc-price"></span>
         <span class="cart-item-per-unit">/ ${product.unit || 'unit'}</span>
       </div>
@@ -588,7 +589,7 @@ function buildCartRow(product, qty) {
       <input class="stepper-input cart-qty" type="number" min="1" value="${qty}" aria-label="Quantity" />
       <button class="stepper-btn cart-plus" aria-label="Increase">+</button>
     </div>
-    <span class="cart-item-line-total">${fmt(sub0 - disc0)}</span>
+    <span class="cart-item-line-total">${fmtPence(line0.lineTotalPence)}</span>
     <button class="cart-item-remove" aria-label="Remove item">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -644,12 +645,9 @@ function buildCartRow(product, qty) {
 
   /* Seed price line + saving text if discount already active on open */
   if (hasDisc && existingDisc) {
-    discSaving.textContent = 'Saving: ' + fmt(disc0);
-    const discedUnit = existingDisc.mode === 'pct'
-      ? product.price * (1 - existingDisc.value / 100)
-      : product.price - existingDisc.value;
+    discSaving.textContent = 'Saving: ' + fmtPence(line0.discountPence);
     origPrice.classList.add('cart-item-orig-price--struck');
-    discPrice.textContent = '→ ' + fmt(discedUnit);
+    discPrice.textContent = '→ ' + formatDiscountedUnit(line0);
   }
 
   /* ---- refresh: qty change → update line total ---- */
@@ -657,8 +655,12 @@ function buildCartRow(product, qty) {
     const q   = parseInt(qtyInput.value, 10) || 1;
     cart[product.id] = q;
     saveCart();
-    const sub = product.price * q;
-    lineTotal.textContent = fmt(sub - getItemDiscountAmount(product.id, sub, product.price));
+    const line = calculateCartLine(product, q);
+    lineTotal.textContent = fmtPence(line.lineTotalPence);
+    if (line.discountPence > 0) {
+      discPrice.textContent = '→ ' + formatDiscountedUnit(line);
+      discSaving.textContent = 'Saving: ' + fmtPence(line.discountPence);
+    }
     refreshDrawerTotals();
     updateCartUI();
     syncCardBtn(product.id);
@@ -667,13 +669,15 @@ function buildCartRow(product, qty) {
   /* ---- refreshDiscount: discount input change ---- */
   function refreshDiscount() {
     const q      = parseInt(qtyInput.value, 10) || 1;
-    const sub    = product.price * q;
     const activeBtn = discRow.querySelector('.disc-mode-btn.active');
     const mode      = activeBtn ? activeBtn.dataset.mode : 'pct';
     let val      = parseFloat(discInput.value);
     if (isNaN(val) || val < 0) val = 0;
     if (mode === 'pct')   val = Math.min(100, val);
-    if (mode === 'fixed') val = Math.min(product.price, val);
+    if (mode === 'fixed') {
+      const fixedPence = Math.min(product.pricePence, Math.max(0, RioMoney.toPence(val)));
+      val = RioMoney.fromPence(fixedPence);
+    }
 
     if (val > 0) {
       discounts[product.id] = { mode, value: val };
@@ -682,18 +686,15 @@ function buildCartRow(product, qty) {
     }
     saveCart();
 
-    const discAmt = getItemDiscountAmount(product.id, sub, product.price);
-    lineTotal.textContent = fmt(sub - discAmt);
+    const line = calculateCartLine(product, q);
+    lineTotal.textContent = fmtPence(line.lineTotalPence);
 
     const activeDisc = discounts[product.id];
-    if (discAmt > 0 && activeDisc) {
+    if (line.discountPence > 0 && activeDisc) {
       /* Price line: strike original, show discounted unit price */
-      const discedUnit = activeDisc.mode === 'pct'
-        ? product.price * (1 - activeDisc.value / 100)
-        : product.price - activeDisc.value;
       origPrice.classList.add('cart-item-orig-price--struck');
-      discPrice.textContent = '→ ' + fmt(discedUnit);
-      discSaving.textContent = 'Saving: ' + fmt(discAmt);
+      discPrice.textContent = '→ ' + formatDiscountedUnit(line);
+      discSaving.textContent = 'Saving: ' + fmtPence(line.discountPence);
       discSaving.classList.add('disc-saving--active');
     } else {
       origPrice.classList.remove('cart-item-orig-price--struck');
@@ -760,7 +761,7 @@ function buildCartRow(product, qty) {
     discRow.classList.add('discount-row--hidden');
     discTrigger.setAttribute('aria-expanded', 'false');
     const q   = parseInt(qtyInput.value, 10) || 1;
-    lineTotal.textContent = fmt(product.price * q);
+    lineTotal.textContent = fmtPence(product.pricePence * q);
     saveCart();
     refreshDrawerTotals();
   });
@@ -781,18 +782,16 @@ function buildCartRow(product, qty) {
 }
 
 function refreshDrawerTotals() {
-  const count   = cartItemCount();
-  const sub     = cartTotal();
-  const final   = cartFinalTotal();
-  const discAmt = sub - final;
+  const count  = cartItemCount();
+  const totals = calculateCartTotals();
 
-  drawerSubtitle.textContent = count + ' item' + (count !== 1 ? 's' : '') + ' \u00B7 ' + fmt(final);
-  drawerTotal.textContent    = fmt(final);
+  drawerSubtitle.textContent = count + ' item' + (count !== 1 ? 's' : '') + ' \u00B7 ' + fmtPence(totals.totalPence);
+  drawerTotal.textContent    = fmtPence(totals.totalPence);
 
-  if (discAmt > 0) {
+  if (totals.orderDiscountPence > 0) {
     document.getElementById('orderSubtotalRow').classList.remove('hidden');
-    document.getElementById('orderSubtotalVal').textContent  = fmt(sub);
-    document.getElementById('orderDiscSaving').textContent   = '\u2212' + fmt(discAmt);
+    document.getElementById('orderSubtotalVal').textContent  = fmtPence(totals.subtotalPence);
+    document.getElementById('orderDiscSaving').textContent   = '\u2212' + fmtPence(totals.orderDiscountPence);
     document.getElementById('orderDiscSaving').classList.remove('hidden');
     document.getElementById('drawerTotalLabel').textContent  = 'Total Payable';
   } else {
@@ -1033,17 +1032,16 @@ async function submitOrder() {
 
   const customer = { shopName, contactName, phone, email, notes };
   const fallbackItems = validCartEntries.map(({ product: p, qty }) => {
-    const subtotal    = p.price * qty;
-    const discountAmt = getItemDiscountAmount(p.id, subtotal, p.price);
-    const d           = discounts[p.id];
+    const line = calculateCartLine(p, qty);
+    const d    = discounts[p.id];
     return {
       name:          p.name,
       unit:          p.unit,
       qty,
-      unitPrice:     p.price,
-      discountAmt,
+      unitPrice:     RioMoney.fromPence(line.unitPricePence),
+      discountAmt:   RioMoney.fromPence(line.discountPence),
       discountLabel: d && d.value ? formatDiscountLabel(d) : null,
-      lineTotal:     subtotal - discountAmt,
+      lineTotal:     RioMoney.fromPence(line.lineTotalPence),
     };
   });
 
