@@ -48,7 +48,7 @@ const FALLBACK_IMG = 'https://images.unsplash.com/photo-1586201375761-83865001e3
 let allProducts = [];
 let cart = {};
 let discounts = {};
-let orderDiscountPct = 0;
+let orderDiscount = null;
 let activeCategory    = 'all';
 let activeSubcategory = 'all';
 let searchQuery       = '';
@@ -123,7 +123,20 @@ function setCatalogueState(nextState) {
    CART PERSISTENCE
    ============================================================ */
 function saveCart() {
-  localStorage.setItem('rioTradingCart', JSON.stringify({ cart, discounts, orderDiscountPct }));
+  localStorage.setItem('rioTradingCart', JSON.stringify({ cart, discounts, orderDiscount }));
+}
+
+function normaliseStoredOrderDiscount(discount) {
+  if (!discount || typeof discount !== 'object') return null;
+  if (discount.mode !== 'pct' && discount.mode !== 'fixed') return null;
+
+  let value = Number(discount.value);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (discount.mode === 'pct') value = Math.min(100, value);
+  if (discount.mode === 'fixed') {
+    value = RioMoney.fromPence(Math.max(0, RioMoney.toPence(value)));
+  }
+  return value > 0 ? { mode: discount.mode, value } : null;
 }
 
 function loadCart() {
@@ -132,17 +145,25 @@ function loadCart() {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && typeof parsed.cart === 'object') {
-        cart             = parsed.cart             || {};
-        discounts        = parsed.discounts        || {};
-        orderDiscountPct = parsed.orderDiscountPct || 0;
+        cart          = parsed.cart      || {};
+        discounts     = parsed.discounts || {};
+        orderDiscount = normaliseStoredOrderDiscount(parsed.orderDiscount);
+
+        /* Migrate percentage-only carts saved by earlier app versions. */
+        if (!orderDiscount && Number(parsed.orderDiscountPct) > 0) {
+          orderDiscount = {
+            mode: 'pct',
+            value: Math.min(100, Number(parsed.orderDiscountPct)),
+          };
+        }
       } else {
-        cart             = parsed || {};
-        discounts        = {};
-        orderDiscountPct = 0;
+        cart          = parsed || {};
+        discounts     = {};
+        orderDiscount = null;
       }
     }
   } catch (e) {
-    cart = {}; discounts = {}; orderDiscountPct = 0;
+    cart = {}; discounts = {}; orderDiscount = null;
   }
 }
 
@@ -203,7 +224,36 @@ function calculateCartTotals() {
   const lines = getValidCartEntries().map(({ product, qty }) =>
     calculateCartLine(product, qty)
   );
-  return RioMoney.calculateOrder(lines, orderDiscountPct);
+  return RioMoney.calculateOrder(lines, orderDiscount);
+}
+
+function cartSubtotalBeforeOrderDiscount() {
+  const lines = getValidCartEntries().map(({ product, qty }) =>
+    calculateCartLine(product, qty)
+  );
+  return RioMoney.calculateOrder(lines, null).subtotalPence;
+}
+
+function clampFixedOrderDiscountToSubtotal() {
+  const input = document.getElementById('orderDiscInput');
+  const fixedButton = document.querySelector('.order-disc-mode-btn[data-mode="fixed"]');
+  const subtotalPence = cartSubtotalBeforeOrderDiscount();
+
+  if (input && fixedButton && fixedButton.classList.contains('active')) {
+    input.max = RioMoney.fromPence(subtotalPence).toFixed(2);
+  }
+  if (!orderDiscount || orderDiscount.mode !== 'fixed') return;
+
+  const fixedPence = Math.min(subtotalPence, RioMoney.toPence(orderDiscount.value));
+  const nextDiscount = fixedPence > 0
+    ? { mode: 'fixed', value: RioMoney.fromPence(fixedPence) }
+    : null;
+  const changed = !nextDiscount || nextDiscount.value !== orderDiscount.value;
+  if (!changed) return;
+
+  orderDiscount = nextDiscount;
+  if (input) input.value = nextDiscount ? nextDiscount.value.toFixed(2) : '';
+  saveCart();
 }
 
 function formatDiscountLabel(d) {
@@ -782,6 +832,7 @@ function buildCartRow(product, qty) {
 }
 
 function refreshDrawerTotals() {
+  clampFixedOrderDiscountToSubtotal();
   const count  = cartItemCount();
   const totals = calculateCartTotals();
 
@@ -1048,8 +1099,16 @@ async function submitOrder() {
   try {
     if (!window.RioOrderApi) throw new Error('The order service client did not load.');
 
+    clampFixedOrderDiscountToSubtotal();
+    const calculatedPreview = calculateCartTotals();
+    const requestOrderDiscount = calculatedPreview.orderDiscountPence > 0
+      ? {
+          mode: calculatedPreview.orderDiscountMode,
+          value: calculatedPreview.orderDiscountValue,
+        }
+      : null;
     const requestWithoutId = {
-      contractVersion: 1,
+      contractVersion: 2,
       customer,
       items: validCartEntries
         .map(({ product, qty }) => ({
@@ -1063,7 +1122,7 @@ async function submitOrder() {
             : null,
         }))
         .sort((a, b) => a.productId.localeCompare(b.productId, undefined, { numeric: true })),
-      orderDiscountPct: Number(orderDiscountPct) || 0,
+      orderDiscount: requestOrderDiscount,
     };
     const fingerprint = await RioOrderApi.fingerprintPayload(requestWithoutId);
     const submissionId = RioOrderApi.getOrCreateSubmissionId(fingerprint, localStorage);
@@ -1072,7 +1131,7 @@ async function submitOrder() {
       submissionId,
       customer: requestWithoutId.customer,
       items: requestWithoutId.items,
-      orderDiscountPct: requestWithoutId.orderDiscountPct,
+      orderDiscount: requestWithoutId.orderDiscount,
     });
 
     const orderData = RioOrderApi.toOrderData(response, customer, fallbackItems);
@@ -1179,14 +1238,28 @@ function showResult(type, orderData, detail) {
 }
 
 function placeAnotherOrder() {
-  cart             = {};
-  discounts        = {};
-  orderDiscountPct = 0;
+  cart          = {};
+  discounts     = {};
+  orderDiscount = null;
   if (window.RioOrderApi) RioOrderApi.clearSubmission(localStorage);
   const discInput  = document.getElementById('orderDiscInput');
   const discPanel  = document.getElementById('orderDiscPanel');
   const discAddBtn = document.getElementById('orderDiscAddBtn');
+  const discUnit   = document.getElementById('orderDiscUnit');
+  const modeBtns   = document.querySelectorAll('.order-disc-mode-btn');
   if (discInput)  discInput.value = '';
+  if (discInput) {
+    discInput.max = '100';
+    discInput.step = '0.1';
+    discInput.placeholder = '0–100';
+    discInput.setAttribute('aria-label', 'Percentage order discount');
+  }
+  if (discUnit) discUnit.textContent = '%';
+  modeBtns.forEach(btn => {
+    const active = btn.dataset.mode === 'pct';
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
   if (discPanel)  discPanel.classList.remove('open');
   if (discAddBtn) discAddBtn.classList.remove('hidden');
   saveCart();
@@ -1418,7 +1491,10 @@ function buildPDF(d) {
   /* Subtotal + order discount rows \u2014 only when an order discount exists */
   if (d.orderDiscountAmt > 0) {
     totLine('Subtotal (after item discounts):', fmt(d.subtotal || d.total));
-    totLine('Order Discount (' + d.orderDiscountPct + '%):', '-' + fmt(d.orderDiscountAmt));
+    const orderDiscountLabel = d.orderDiscountMode === 'fixed'
+      ? 'Order Discount (Fixed):'
+      : 'Order Discount (' + d.orderDiscountPct + '%):';
+    totLine(orderDiscountLabel, '-' + fmt(d.orderDiscountAmt));
     rule(y, 0.2, 180);
     y += 5;
   }
@@ -1462,17 +1538,45 @@ function initOrderDiscountUI() {
   const clearBtn = document.getElementById('orderDiscClear');
   const addBtn   = document.getElementById('orderDiscAddBtn');
   const panel    = document.getElementById('orderDiscPanel');
+  const unit     = document.getElementById('orderDiscUnit');
+  const modeBtns = Array.from(document.querySelectorAll('.order-disc-mode-btn'));
+  let selectedMode = orderDiscount ? orderDiscount.mode : 'pct';
+
+  function setMode(mode) {
+    selectedMode = mode === 'fixed' ? 'fixed' : 'pct';
+    modeBtns.forEach(btn => {
+      const active = btn.dataset.mode === selectedMode;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-pressed', String(active));
+    });
+
+    if (selectedMode === 'pct') {
+      input.max = '100';
+      input.step = '0.1';
+      input.placeholder = '0–100';
+      input.setAttribute('aria-label', 'Percentage order discount');
+      unit.textContent = '%';
+    } else {
+      input.max = RioMoney.fromPence(cartSubtotalBeforeOrderDiscount()).toFixed(2);
+      input.step = '0.01';
+      input.placeholder = '0.00';
+      input.setAttribute('aria-label', 'Fixed order discount');
+      unit.textContent = '£';
+    }
+  }
 
   function openPanel() {
     addBtn.classList.add('hidden');
     panel.classList.add('open');
+    setMode(orderDiscount ? orderDiscount.mode : selectedMode);
     input.focus();
   }
 
   function closePanel() {
     panel.classList.remove('open');
     addBtn.classList.remove('hidden');
-    orderDiscountPct = 0;
+    orderDiscount = null;
+    setMode('pct');
     input.value = '';
     saveCart();
     refreshDrawerTotals();
@@ -1480,21 +1584,56 @@ function initOrderDiscountUI() {
   }
 
   // Restore persisted discount from localStorage
-  if (orderDiscountPct > 0) {
-    input.value = orderDiscountPct;
+  setMode(selectedMode);
+  if (orderDiscount && orderDiscount.value > 0) {
+    input.value = orderDiscount.mode === 'fixed'
+      ? Number(orderDiscount.value).toFixed(2)
+      : orderDiscount.value;
     openPanel();
   }
 
   addBtn.addEventListener('click', openPanel);
 
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const newMode = btn.dataset.mode;
+      if (newMode === selectedMode) return;
+      orderDiscount = null;
+      input.value = '';
+      setMode(newMode);
+      saveCart();
+      refreshDrawerTotals();
+      updateCartUI();
+      input.focus();
+    });
+  });
+
   input.addEventListener('input', () => {
     let val = parseFloat(input.value);
     if (isNaN(val) || val < 0) val = 0;
-    val = Math.min(100, val);
-    orderDiscountPct = val;
+    if (selectedMode === 'pct') {
+      if (val > 100) input.value = '100';
+      val = Math.min(100, val);
+    } else {
+      const subtotalPence = cartSubtotalBeforeOrderDiscount();
+      const requestedPence = Math.max(0, RioMoney.toPence(val));
+      const fixedPence = Math.min(subtotalPence, requestedPence);
+      if (requestedPence > subtotalPence) {
+        input.value = RioMoney.fromPence(fixedPence).toFixed(2);
+      }
+      val = RioMoney.fromPence(fixedPence);
+    }
+
+    orderDiscount = val > 0 ? { mode: selectedMode, value: val } : null;
     saveCart();
     refreshDrawerTotals();
     updateCartUI();
+  });
+
+  input.addEventListener('blur', () => {
+    if (orderDiscount && orderDiscount.mode === 'fixed') {
+      input.value = Number(orderDiscount.value).toFixed(2);
+    }
   });
 
   clearBtn.addEventListener('click', closePanel);

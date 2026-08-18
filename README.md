@@ -9,7 +9,7 @@ The project deliberately uses plain HTML, CSS, and JavaScript. There is no front
 1. The owner opens the catalogue on a phone, tablet, or laptop during a customer visit.
 2. The app loads the latest active products and prices from the published Google Sheet.
 3. The owner searches or filters the catalogue and adds the requested quantities.
-4. Optional discounts can be applied per item as a percentage or fixed amount per unit. An optional percentage discount can also be applied to the order total.
+4. Optional discounts can be applied per item as a percentage or fixed amount per unit. A percentage or fixed amount can also be applied once to the order subtotal.
 5. The owner records the shop name, contact name, UK phone number, email address, and any notes.
 6. The browser submits product IDs, quantities, discount instructions, and customer details to Google Apps Script.
 7. Apps Script reloads the authoritative product sheet, validates the request, and recalculates every commercial value in integer pennies.
@@ -38,7 +38,7 @@ The retailer's email is currently stored with the order but is not sent a confir
 - Automatic removal of stale, deleted, or invalid cart entries after catalogue loading
 - Empty-cart blocking before the customer form and at submission
 - Percentage or fixed-per-unit item discounts
-- Percentage discount on the subtotal after item discounts
+- Percentage or fixed GBP discount on the subtotal after item discounts
 - Matching integer-pence calculations in the frontend and backend
 - Customer detail validation for required fields, UK phone number, and email format
 
@@ -185,10 +185,10 @@ All current calculations are in GBP without VAT:
 2. Quantity must be a positive whole number.
 3. A percentage item discount is calculated against the gross line total and rounded to the nearest penny.
 4. A fixed item discount is a per-unit value, rounded to pennies and limited to the unit price.
-5. The order-level percentage discount is calculated after item discounts and rounded to the nearest penny.
+5. An order-level percentage discount is calculated after item discounts and rounded to the nearest penny. A fixed order discount is rounded to pennies and applied once, never per item.
 6. Apps Script repeats these rules using the authoritative product price. Its saved response is used for the successful order result and Order Confirmation.
 
-No VAT, delivery charge, minimum-order value, payment terms, or stock reservation is currently calculated.
+Only one order-level discount mode can be active at a time, and a fixed discount cannot exceed the subtotal. No VAT, delivery charge, minimum-order value, payment terms, or stock reservation is currently calculated.
 
 ## Order Storage and Email
 
@@ -217,7 +217,7 @@ node apps-script/tests/run-tests.js
 The tests cover:
 
 - Integer-pence conversion and rounding
-- Frontend/backend calculation parity across catalogue-like prices, quantities, and discounts
+- Frontend/backend calculation parity across catalogue-like prices, quantities, item discounts, and percentage/fixed order discounts
 - Order request construction and response mapping
 - Duplicate-safe submissions
 - Server validation and authoritative price calculation
@@ -247,6 +247,8 @@ The frontend can be hosted by GitHub Pages or another static web host. Merging o
 Changes under `apps-script/` must be copied or synchronised to the Apps Script project and deployed as a new web-app version. After deployment, confirm that `CONFIG.ORDER_API_URL` still points to the correct `/exec` URL.
 
 The backend script must remain authorised by the Google account that owns the spreadsheet and sends the owner email.
+
+The current backend accepts legacy version-1 percentage-only requests and version-2 `% / £` order-discount requests. When releasing the fixed order-discount feature, deploy `apps-script/Code.gs` first and the static frontend second. This keeps the existing site working during the cutover and ensures an old backend cannot silently accept a fixed discount it does not understand.
 
 ## Current Scope and Known Limitations
 

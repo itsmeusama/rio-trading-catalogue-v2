@@ -56,6 +56,7 @@ This test sends one real email to the fixed owner address.
    - the Rio Trading heading, order reference and date are readable;
    - customer details and notes are complete;
    - both products, quantities, prices and discounts are correct;
+   - the fixed whole-order discount is shown as `Order discount (fixed)`;
    - the final order total agrees with the `Orders` row;
    - no text is clipped, overlapping or missing.
 8. Run `runPhase3EmailTest` a second time. It must return the same order
@@ -94,6 +95,12 @@ The `/exec` URL remains the same. Publishing a new version is required because
 the final response now includes the authoritative saved line items used by the
 browser's downloadable Order Confirmation.
 
+The current backend also accepts version-2 requests with percentage or fixed
+whole-order discounts while retaining version-1 percentage compatibility.
+Deploy this backend version before publishing the matching static frontend.
+That release order keeps the existing frontend operational and makes the new
+frontend fail closed if it is accidentally served against an older backend.
+
 The frontend now posts through `order-api.js`; EmailJS and its browser SDK have
 been removed. An unchanged uncertain retry reuses its submission UUID. If the
 cart, discounts or customer details change, the request fingerprint changes and
@@ -103,7 +110,7 @@ a fresh UUID is created.
 
 After the new Apps Script version is deployed, run one order from the catalogue:
 
-1. Add two products, including one item discount and one order discount.
+1. Add two products, including one item discount and one fixed order discount.
 2. Enter clearly marked test customer details and submit once.
 3. Confirm the success screen shows a permanent `ORD-...` reference.
 4. Confirm one `Orders` row and the matching `Order Items` rows were added.

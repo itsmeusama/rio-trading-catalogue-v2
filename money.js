@@ -78,7 +78,37 @@
     });
   }
 
-  function calculateOrder(lines, orderDiscountPct) {
+  function normaliseOrderDiscount_(discount) {
+    if (discount === undefined || discount === null) return null;
+
+    /* Backward compatibility for the original percentage-only caller. */
+    if (typeof discount === 'number') {
+      var legacyPercentage = clampPercentage(discount);
+      return legacyPercentage > 0
+        ? { mode: 'pct', value: legacyPercentage }
+        : null;
+    }
+
+    if (typeof discount !== 'object') {
+      throw new TypeError('Order discount must be an object, number, or null.');
+    }
+    if (discount.mode !== 'pct' && discount.mode !== 'fixed') {
+      throw new TypeError('Order discount mode must be pct or fixed.');
+    }
+
+    var value = finiteNumber_(discount.value, 'Order discount');
+    if (value <= 0) return null;
+    if (discount.mode === 'pct') {
+      return { mode: 'pct', value: clampPercentage(value) };
+    }
+
+    var fixedPence = Math.max(0, toPence(value));
+    return fixedPence > 0
+      ? { mode: 'fixed', value: fromPence(fixedPence) }
+      : null;
+  }
+
+  function calculateOrder(lines, orderDiscount) {
     if (!Array.isArray(lines)) throw new TypeError('Order lines must be an array.');
 
     var totals = lines.reduce(function(result, line) {
@@ -88,14 +118,34 @@
     }, { grossSubtotalPence: 0, itemDiscountPence: 0 });
 
     var subtotalPence = totals.grossSubtotalPence - totals.itemDiscountPence;
-    var percentage = clampPercentage(orderDiscountPct);
-    var orderDiscountPence = Math.round(subtotalPence * percentage / 100);
+    var normalisedDiscount = normaliseOrderDiscount_(orderDiscount);
+    var orderDiscountMode = '';
+    var orderDiscountValue = 0;
+    var orderDiscountPct = 0;
+    var orderDiscountPence = 0;
+
+    if (normalisedDiscount) {
+      orderDiscountMode = normalisedDiscount.mode;
+      if (normalisedDiscount.mode === 'pct') {
+        orderDiscountValue = normalisedDiscount.value;
+        orderDiscountPct = normalisedDiscount.value;
+        orderDiscountPence = Math.round(subtotalPence * orderDiscountPct / 100);
+      } else {
+        orderDiscountPence = Math.min(
+          subtotalPence,
+          toPence(normalisedDiscount.value)
+        );
+        orderDiscountValue = fromPence(orderDiscountPence);
+      }
+    }
 
     return Object.freeze({
       grossSubtotalPence: totals.grossSubtotalPence,
       itemDiscountPence: totals.itemDiscountPence,
       subtotalPence: subtotalPence,
-      orderDiscountPct: percentage,
+      orderDiscountMode: orderDiscountMode,
+      orderDiscountValue: orderDiscountValue,
+      orderDiscountPct: orderDiscountPct,
       orderDiscountPence: orderDiscountPence,
       totalPence: subtotalPence - orderDiscountPence,
     });

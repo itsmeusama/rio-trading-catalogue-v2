@@ -176,6 +176,16 @@
       ? String(response.createdAt || '')
       : created.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' });
     var totals = response.totals;
+    var orderDiscountPct = Number(totals.orderDiscountPct) || 0;
+    var orderDiscountAmount = Number(totals.orderDiscountAmount) || 0;
+    var orderDiscountMode = String(
+      totals.orderDiscountMode || (orderDiscountPct > 0 ? 'pct' : (orderDiscountAmount > 0 ? 'fixed' : ''))
+    );
+    var orderDiscountValue = Number(
+      totals.orderDiscountValue !== undefined
+        ? totals.orderDiscountValue
+        : (orderDiscountMode === 'pct' ? orderDiscountPct : orderDiscountAmount)
+    ) || 0;
 
     return {
       orderRef: String(response.orderRef),
@@ -188,8 +198,10 @@
       items: items,
       subtotal: Number(totals.subtotal),
       total: Number(totals.total),
-      orderDiscountPct: Number(totals.orderDiscountPct) || 0,
-      orderDiscountAmt: Number(totals.orderDiscountAmount) || 0,
+      orderDiscountMode: orderDiscountMode,
+      orderDiscountValue: orderDiscountValue,
+      orderDiscountPct: orderDiscountPct,
+      orderDiscountAmt: orderDiscountAmount,
       orderStatus: response.orderStatus,
       emailStatus: response.emailStatus,
       duplicate: response.duplicate === true,

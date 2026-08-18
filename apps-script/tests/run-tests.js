@@ -51,7 +51,7 @@ function productRows() {
 
 function validPayload() {
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     submissionId: '11111111-1111-4111-8111-111111111111',
     customer: {
       shopName: 'Corner Shop Ltd',
@@ -64,15 +64,23 @@ function validPayload() {
       { productId: '1', quantity: 2, discount: { mode: 'pct', value: 10 } },
       { productId: '5', quantity: 1, discount: { mode: 'fixed', value: 2 } },
     ],
-    orderDiscountPct: 5,
+    orderDiscount: { mode: 'pct', value: 5 },
   };
+}
+
+function legacyPayload() {
+  const payload = validPayload();
+  payload.contractVersion = 1;
+  delete payload.orderDiscount;
+  payload.orderDiscountPct = 5;
+  return payload;
 }
 
 function expectPublicError(code, fn) {
   assert.throws(fn, error => error && error.publicCode === code);
 }
 
-function assertMoneyParity(price, quantity, discount, orderDiscountPct) {
+function assertMoneyParity(price, quantity, discount, orderDiscount) {
   const product = {
     id: 'parity-product',
     name: 'Parity Product',
@@ -83,7 +91,7 @@ function assertMoneyParity(price, quantity, discount, orderDiscountPct) {
   };
   const request = {
     items: [{ productId: product.id, quantity, discount }],
-    orderDiscountPct,
+    orderDiscount,
   };
   const backend = context.calculateOrder_(request, { [product.id]: product });
   const frontendLine = context.RioMoney.calculateLine(
@@ -91,8 +99,8 @@ function assertMoneyParity(price, quantity, discount, orderDiscountPct) {
     quantity,
     discount
   );
-  const frontend = context.RioMoney.calculateOrder([frontendLine], orderDiscountPct);
-  const label = JSON.stringify({ price, quantity, discount, orderDiscountPct });
+  const frontend = context.RioMoney.calculateOrder([frontendLine], orderDiscount);
+  const label = JSON.stringify({ price, quantity, discount, orderDiscount });
 
   [
     'grossSubtotalPence',
@@ -114,6 +122,9 @@ function run() {
 
   const request = context.validateOrderRequest_(validPayload());
   const calculated = context.calculateOrder_(request, catalogue);
+  const legacyRequest = context.validateOrderRequest_(legacyPayload());
+  const legacyCalculated = context.calculateOrder_(legacyRequest, catalogue);
+  assert.equal(legacyCalculated.totalPence, calculated.totalPence, 'version 1 percentage orders must remain supported');
   assert.deepEqual(
     {
       gross: calculated.grossSubtotalPence,
@@ -138,7 +149,7 @@ function run() {
     { productId: '20', quantity: 1, discount: { mode: 'pct', value: 50 } },
     { productId: '5', quantity: 3, discount: { mode: 'fixed', value: 2 } },
   ];
-  parityPayload.orderDiscountPct = 5;
+  parityPayload.orderDiscount = { mode: 'pct', value: 5 };
   const parityRequest = context.validateOrderRequest_(parityPayload);
   const backendParity = context.calculateOrder_(parityRequest, catalogue);
   const frontendLines = parityRequest.items.map(item => context.RioMoney.calculateLine(
@@ -146,7 +157,7 @@ function run() {
     item.quantity,
     item.discount
   ));
-  const frontendParity = context.RioMoney.calculateOrder(frontendLines, parityRequest.orderDiscountPct);
+  const frontendParity = context.RioMoney.calculateOrder(frontendLines, parityRequest.orderDiscount);
   assert.deepEqual(
     {
       grossSubtotalPence: frontendParity.grossSubtotalPence,
@@ -178,21 +189,39 @@ function run() {
   cataloguePrices.forEach(price => {
     quantities.forEach(quantity => {
       orderPercentages.forEach(orderPct => {
-        assertMoneyParity(price, quantity, null, orderPct);
+        const orderDiscount = orderPct > 0 ? { mode: 'pct', value: orderPct } : null;
+        assertMoneyParity(price, quantity, null, orderDiscount);
         parityCaseCount++;
         percentages.forEach(percentage => {
-          assertMoneyParity(price, quantity, { mode: 'pct', value: percentage }, orderPct);
+          assertMoneyParity(price, quantity, { mode: 'pct', value: percentage }, orderDiscount);
           parityCaseCount++;
         });
       });
 
       [0.01, 0.1, 1, 1.235, 2.49].filter(value => value <= price).forEach(value => {
-        assertMoneyParity(price, quantity, { mode: 'fixed', value }, 5);
+        assertMoneyParity(price, quantity, { mode: 'fixed', value }, { mode: 'pct', value: 5 });
         parityCaseCount++;
+      });
+
+      [null, { mode: 'pct', value: 15 }].forEach(itemDiscount => {
+        const line = context.RioMoney.calculateLine(
+          context.toPence_(price),
+          quantity,
+          itemDiscount
+        );
+        [1, Math.round(line.lineTotalPence / 3), line.lineTotalPence].forEach(fixedPence => {
+          assertMoneyParity(
+            price,
+            quantity,
+            itemDiscount,
+            { mode: 'fixed', value: context.fromPence_(fixedPence) }
+          );
+          parityCaseCount++;
+        });
       });
     });
   });
-  assert.equal(parityCaseCount, 2872, 'the rounding parity matrix must remain comprehensive');
+  assert.equal(parityCaseCount, 3304, 'the rounding parity matrix must remain comprehensive');
 
   assert.equal(context.safeSheetText_('Corner Shop Ltd'), 'Corner Shop Ltd');
   assert.equal(context.safeSheetText_(''), '');
@@ -280,6 +309,69 @@ function run() {
     context.calculateOrder_(context.validateOrderRequest_(excessiveFixedDiscount), catalogue);
   });
 
+  const legacyWithVersion2Field = legacyPayload();
+  legacyWithVersion2Field.orderDiscount = { mode: 'fixed', value: 1 };
+  expectPublicError('INVALID_REQUEST', () => context.validateOrderRequest_(legacyWithVersion2Field));
+
+  const version2WithLegacyField = validPayload();
+  version2WithLegacyField.orderDiscountPct = 5;
+  expectPublicError('INVALID_REQUEST', () => context.validateOrderRequest_(version2WithLegacyField));
+
+  const invalidOrderDiscountMode = validPayload();
+  invalidOrderDiscountMode.orderDiscount = { mode: 'cash', value: 1 };
+  expectPublicError('INVALID_DISCOUNT', () => context.validateOrderRequest_(invalidOrderDiscountMode));
+
+  const excessiveFixedOrderDiscount = validPayload();
+  excessiveFixedOrderDiscount.orderDiscount = { mode: 'fixed', value: 29 };
+  expectPublicError('INVALID_DISCOUNT', () => {
+    context.calculateOrder_(context.validateOrderRequest_(excessiveFixedOrderDiscount), catalogue);
+  });
+
+  const fixedOrderPayload = validPayload();
+  fixedOrderPayload.orderDiscount = { mode: 'fixed', value: 3 };
+  const fixedOrderRequest = context.validateOrderRequest_(fixedOrderPayload);
+  const fixedOrderCalculated = context.calculateOrder_(fixedOrderRequest, catalogue);
+  assert.equal(fixedOrderCalculated.orderDiscountMode, 'fixed');
+  assert.equal(fixedOrderCalculated.orderDiscountValue, 3);
+  assert.equal(fixedOrderCalculated.orderDiscountPct, 0);
+  assert.equal(fixedOrderCalculated.orderDiscountPence, 300);
+  assert.equal(fixedOrderCalculated.totalPence, 2599);
+
+  const roundedFixedOrderPayload = validPayload();
+  roundedFixedOrderPayload.orderDiscount = { mode: 'fixed', value: 1.235 };
+  const roundedFixedOrder = context.calculateOrder_(
+    context.validateOrderRequest_(roundedFixedOrderPayload),
+    catalogue
+  );
+  assert.equal(roundedFixedOrder.orderDiscountValue, 1.24);
+  assert.equal(roundedFixedOrder.orderDiscountPence, 124);
+  const fixedOrderRow = context.buildOrderRow_(
+    'ORD-20260802-FIXED',
+    new Date('2026-08-02T12:00:00Z'),
+    fixedOrderRequest,
+    fixedOrderCalculated
+  );
+  assert.equal(fixedOrderRow[13], '', 'fixed discounts must leave order_discount_pct blank');
+  assert.equal(fixedOrderRow[14], 3, 'order_discount_amount must store the fixed amount');
+  const savedFixedDiscount = context.readSavedOrderDiscount_(fixedOrderRow);
+  assert.equal(savedFixedDiscount.mode, 'fixed');
+  assert.equal(savedFixedDiscount.value, 3);
+  assert.equal(savedFixedDiscount.pct, 0);
+  const fixedItemRows = context.buildOrderItemRows_('ORD-20260802-FIXED', fixedOrderCalculated.lines);
+  const fixedDuplicateResponse = context.buildExistingOrderResponse_(
+    { rowNumber: 2, values: fixedOrderRow },
+    {
+      orderItems: {
+        getLastRow: () => fixedItemRows.length + 1,
+        getRange: () => ({ getValues: () => fixedItemRows.map(row => row.slice()) }),
+      },
+    }
+  );
+  assert.equal(fixedDuplicateResponse.duplicate, true);
+  assert.equal(fixedDuplicateResponse.totals.orderDiscountMode, 'fixed');
+  assert.equal(fixedDuplicateResponse.totals.orderDiscountValue, 3);
+  assert.equal(fixedDuplicateResponse.totals.total, 25.99);
+
   let persisted = null;
   let existingOrder = null;
   const lock = { waitLock() {}, releaseLock() {} };
@@ -340,15 +432,17 @@ function run() {
       notes: 'Back door\nBefore 10am',
     },
     currency: 'GBP',
-    itemCount: calculated.itemCount,
-    grossSubtotal: context.fromPence_(calculated.grossSubtotalPence),
-    itemDiscountAmount: context.fromPence_(calculated.itemDiscountPence),
-    subtotal: context.fromPence_(calculated.subtotalPence),
-    orderDiscountPct: calculated.orderDiscountPct,
-    orderDiscountAmount: context.fromPence_(calculated.orderDiscountPence),
-    total: context.fromPence_(calculated.totalPence),
+    itemCount: fixedOrderCalculated.itemCount,
+    grossSubtotal: context.fromPence_(fixedOrderCalculated.grossSubtotalPence),
+    itemDiscountAmount: context.fromPence_(fixedOrderCalculated.itemDiscountPence),
+    subtotal: context.fromPence_(fixedOrderCalculated.subtotalPence),
+    orderDiscountMode: fixedOrderCalculated.orderDiscountMode,
+    orderDiscountValue: fixedOrderCalculated.orderDiscountValue,
+    orderDiscountPct: fixedOrderCalculated.orderDiscountPct,
+    orderDiscountAmount: context.fromPence_(fixedOrderCalculated.orderDiscountPence),
+    total: context.fromPence_(fixedOrderCalculated.totalPence),
     orderStatus: 'Open',
-    lines: calculated.lines.map(line => ({
+    lines: fixedOrderCalculated.lines.map(line => ({
       lineNumber: line.lineNumber,
       productId: line.productId,
       productName: line.productName,
@@ -368,16 +462,18 @@ function run() {
   assert.match(html, /&lt;script&gt;Corner &amp; Shop&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>Corner/);
   assert.match(html, /Back door<br>Before 10am/);
+  assert.match(html, /Order discount \(fixed\)/);
+  assert.match(html, /-\u00A33\.00/);
 
-  const deliveryRequest = context.validateOrderRequest_(validPayload());
+  const deliveryRequest = fixedOrderRequest;
   const deliveryOrderValues = context.buildOrderRow_(
     accepted.orderRef,
     savedOrderForHtml.createdAt,
     deliveryRequest,
-    calculated
+    fixedOrderCalculated
   );
   deliveryOrderValues[3] = savedOrderForHtml.customer.shopName;
-  const deliveryItemValues = context.buildOrderItemRows_(accepted.orderRef, calculated.lines);
+  const deliveryItemValues = context.buildOrderItemRows_(accepted.orderRef, fixedOrderCalculated.lines);
   let sentMessages = [];
   const pdfBlob = {
     name: '',
@@ -420,6 +516,8 @@ function run() {
     sentMessages[0][3].attachments[0].name,
     'Rio-Trading-Order-Confirmation-ORD-20260802-ABCDE.pdf'
   );
+  assert.match(sentMessages[0][2], /Order discount \(fixed\): -\u00A33\.00/);
+  assert.match(sentMessages[0][2], /ORDER TOTAL: \u00A325\.99/);
   assert.equal(deliveryOrderValues[17], 'Sent');
 
   const alreadySent = context.deliverSavedOrderEmail_(deliverySheets, accepted.orderRef);

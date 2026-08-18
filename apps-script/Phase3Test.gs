@@ -6,24 +6,24 @@
  * duplicate and must not send another email.
  */
 
-var PHASE_3_TEST_SUBMISSION_ID = '00000000-0000-4000-8000-000000000003';
+var PHASE_3_TEST_SUBMISSION_ID = '00000000-0000-4000-8000-000000000004';
 
 function runPhase3EmailTest() {
   var result = processOrder_({
-    contractVersion: 1,
+    contractVersion: 2,
     submissionId: PHASE_3_TEST_SUBMISSION_ID,
     customer: {
       shopName: '[TEST] Phase 3 PDF Email',
       contactName: 'Rio Trading Test',
       phone: '07700900123',
       email: 'riotraders87@gmail.com',
-      notes: 'Phase 3 acceptance test. Verify the attached PDF before cleanup.',
+      notes: 'Fixed order discount acceptance test. Verify the attached PDF before cleanup.',
     },
     items: [
       { productId: '1', quantity: 2, discount: { mode: 'pct', value: 10 } },
       { productId: '5', quantity: 1, discount: { mode: 'fixed', value: 2 } },
     ],
-    orderDiscountPct: 5,
+    orderDiscount: { mode: 'fixed', value: 3 },
   });
 
   console.log(JSON.stringify(result));

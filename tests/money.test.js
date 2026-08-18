@@ -54,10 +54,42 @@ function run() {
     grossSubtotalPence: 4146,
     itemDiscountPence: 725,
     subtotalPence: 3421,
+    orderDiscountMode: 'pct',
+    orderDiscountValue: 5,
     orderDiscountPct: 5,
     orderDiscountPence: 171,
     totalPence: 3250,
   });
+
+  const fixedOrderDiscount = money.calculateOrder(
+    [halfOf249, fixedLine],
+    { mode: 'fixed', value: 10 }
+  );
+  assert.deepEqual(fixedOrderDiscount, {
+    grossSubtotalPence: 4146,
+    itemDiscountPence: 725,
+    subtotalPence: 3421,
+    orderDiscountMode: 'fixed',
+    orderDiscountValue: 10,
+    orderDiscountPct: 0,
+    orderDiscountPence: 1000,
+    totalPence: 2421,
+  });
+
+  const roundedFixedOrderDiscount = money.calculateOrder(
+    [line(12.99, 1)],
+    { mode: 'fixed', value: 1.235 }
+  );
+  assert.equal(roundedFixedOrderDiscount.orderDiscountValue, 1.24);
+  assert.equal(roundedFixedOrderDiscount.orderDiscountPence, 124);
+  assert.equal(roundedFixedOrderDiscount.totalPence, 1175);
+
+  const cappedFixedOrderDiscount = money.calculateOrder(
+    [halfOf249],
+    { mode: 'fixed', value: 100 }
+  );
+  assert.equal(cappedFixedOrderDiscount.orderDiscountPence, 124);
+  assert.equal(cappedFixedOrderDiscount.totalPence, 0);
 
   const fractionalOrderDiscount = money.calculateOrder([line(2.49, 1)], 50);
   assert.equal(fractionalOrderDiscount.orderDiscountPence, 125);
@@ -69,8 +101,12 @@ function run() {
   assert.throws(() => money.toPence('not-money'), /finite number/);
   assert.throws(() => money.calculateLine(249, 0, null), /positive whole number/);
   assert.throws(() => money.calculateLine(249.5, 1, null), /safe whole number/);
+  assert.throws(
+    () => money.calculateOrder([halfOf249], { mode: 'invalid', value: 1 }),
+    /mode must be pct or fixed/
+  );
 
-  console.log('Money tests passed: penny conversion, line rounding, fixed discounts and order totals.');
+  console.log('Money tests passed: penny conversion, line rounding, item discounts and percentage/fixed order totals.');
 }
 
 run();
