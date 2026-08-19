@@ -7,7 +7,8 @@
  */
 
 var ORDER_SYSTEM = Object.freeze({
-  CONTRACT_VERSION: 1,
+  CONTRACT_VERSION: 2,
+  LEGACY_CONTRACT_VERSION: 1,
   SPREADSHEET_ID: '1pDmFNcjy9kBjF0qjH-SoOWXJqbajEqZgsSVdiRTAYtk',
   PRODUCT_SHEET_ID: 1147224303,
   ORDERS_SHEET_NAME: 'Orders',
@@ -184,6 +185,8 @@ function doGet() {
     ok: true,
     service: 'Rio Trading Order API',
     contractVersion: ORDER_SYSTEM.CONTRACT_VERSION,
+    supportedContractVersions: [ORDER_SYSTEM.LEGACY_CONTRACT_VERSION, ORDER_SYSTEM.CONTRACT_VERSION],
+    orderDiscountModes: ['pct', 'fixed'],
     configured: configured,
     persistenceEnabled: true,
     emailDeliveryEnabled: true,
@@ -287,7 +290,10 @@ function validateOrderRequest_(payload) {
     }
   });
 
-  if (payload.contractVersion !== ORDER_SYSTEM.CONTRACT_VERSION) {
+  if (
+    payload.contractVersion !== ORDER_SYSTEM.LEGACY_CONTRACT_VERSION &&
+    payload.contractVersion !== ORDER_SYSTEM.CONTRACT_VERSION
+  ) {
     throw publicError_('INVALID_REQUEST', 'This order request version is not supported.');
   }
 
@@ -346,16 +352,31 @@ function validateOrderRequest_(payload) {
     };
   });
 
-  var orderDiscountPct = payload.orderDiscountPct === undefined ? 0 : payload.orderDiscountPct;
-  if (!isFiniteNumber_(orderDiscountPct) || orderDiscountPct < 0 || orderDiscountPct > 100) {
-    throw publicError_('INVALID_DISCOUNT', 'The order discount must be between 0 and 100 percent.');
+  var orderDiscount = null;
+  if (payload.contractVersion === ORDER_SYSTEM.LEGACY_CONTRACT_VERSION) {
+    if (Object.prototype.hasOwnProperty.call(payload, 'orderDiscount')) {
+      throw publicError_('INVALID_REQUEST', 'Fixed order discounts require request version 2.');
+    }
+    var legacyOrderDiscountPct = payload.orderDiscountPct === undefined ? 0 : payload.orderDiscountPct;
+    if (!isFiniteNumber_(legacyOrderDiscountPct) || legacyOrderDiscountPct < 0 || legacyOrderDiscountPct > 100) {
+      throw publicError_('INVALID_DISCOUNT', 'The order discount must be between 0 and 100 percent.');
+    }
+    if (legacyOrderDiscountPct > 0) {
+      orderDiscount = { mode: 'pct', value: legacyOrderDiscountPct };
+    }
+  } else {
+    if (Object.prototype.hasOwnProperty.call(payload, 'orderDiscountPct')) {
+      throw publicError_('INVALID_REQUEST', 'Request version 2 must use the orderDiscount field.');
+    }
+    orderDiscount = validateOrderDiscount_(payload.orderDiscount);
   }
 
   return {
+    contractVersion: payload.contractVersion,
     submissionId: submissionId,
     customer: customer,
     items: items,
-    orderDiscountPct: orderDiscountPct,
+    orderDiscount: orderDiscount,
   };
 }
 
@@ -372,6 +393,25 @@ function validateItemDiscount_(discount) {
   }
   if (discount.mode === 'pct' && discount.value > 100) {
     throw publicError_('INVALID_DISCOUNT', 'An item percentage discount cannot exceed 100.');
+  }
+  if (discount.value === 0) return null;
+
+  return { mode: discount.mode, value: discount.value };
+}
+
+function validateOrderDiscount_(discount) {
+  if (discount === undefined || discount === null) return null;
+  if (!isObject_(discount)) {
+    throw publicError_('INVALID_DISCOUNT', 'An order discount must be an object or null.');
+  }
+  if (discount.mode !== 'pct' && discount.mode !== 'fixed') {
+    throw publicError_('INVALID_DISCOUNT', 'An order discount mode must be pct or fixed.');
+  }
+  if (!isFiniteNumber_(discount.value) || discount.value < 0) {
+    throw publicError_('INVALID_DISCOUNT', 'An order discount must have a non-negative numeric value.');
+  }
+  if (discount.mode === 'pct' && discount.value > 100) {
+    throw publicError_('INVALID_DISCOUNT', 'An order percentage discount cannot exceed 100.');
   }
   if (discount.value === 0) return null;
 
@@ -442,7 +482,25 @@ function calculateOrder_(request, catalogue) {
   });
 
   var subtotalPence = grossSubtotalPence - itemDiscountPence;
-  var orderDiscountPence = Math.round(subtotalPence * request.orderDiscountPct / 100);
+  var orderDiscountMode = '';
+  var orderDiscountValue = 0;
+  var orderDiscountPct = 0;
+  var orderDiscountPence = 0;
+
+  if (request.orderDiscount) {
+    orderDiscountMode = request.orderDiscount.mode;
+    if (orderDiscountMode === 'pct') {
+      orderDiscountValue = request.orderDiscount.value;
+      orderDiscountPct = request.orderDiscount.value;
+      orderDiscountPence = Math.round(subtotalPence * orderDiscountPct / 100);
+    } else {
+      orderDiscountPence = toPence_(request.orderDiscount.value);
+      if (orderDiscountPence > subtotalPence) {
+        throw publicError_('INVALID_DISCOUNT', 'A fixed order discount cannot exceed the subtotal.');
+      }
+      orderDiscountValue = fromPence_(orderDiscountPence);
+    }
+  }
   var totalPence = subtotalPence - orderDiscountPence;
 
   return {
@@ -451,7 +509,9 @@ function calculateOrder_(request, catalogue) {
     grossSubtotalPence: grossSubtotalPence,
     itemDiscountPence: itemDiscountPence,
     subtotalPence: subtotalPence,
-    orderDiscountPct: request.orderDiscountPct,
+    orderDiscountMode: orderDiscountMode,
+    orderDiscountValue: orderDiscountValue,
+    orderDiscountPct: orderDiscountPct,
     orderDiscountPence: orderDiscountPence,
     totalPence: totalPence,
   };
@@ -514,7 +574,7 @@ function buildOrderRow_(orderRef, createdAt, request, order) {
     fromPence_(order.grossSubtotalPence),
     fromPence_(order.itemDiscountPence),
     fromPence_(order.subtotalPence),
-    order.orderDiscountPct,
+    order.orderDiscountMode === 'pct' ? order.orderDiscountPct : '',
     fromPence_(order.orderDiscountPence),
     fromPence_(order.totalPence),
     ORDER_SYSTEM.ORDER_STATUS_OPEN,
@@ -567,6 +627,7 @@ function buildExistingOrderResponse_(existing, sheets) {
   var values = existing.values;
   var createdAt = values[ORDER_COLUMN.CREATED_AT - 1];
   var savedOrder = loadSavedOrder_(sheets, existing);
+  var savedDiscount = readSavedOrderDiscount_(values);
 
   return {
     ok: true,
@@ -581,7 +642,9 @@ function buildExistingOrderResponse_(existing, sheets) {
       grossSubtotal: Number(values[ORDER_COLUMN.GROSS_SUBTOTAL - 1]) || 0,
       itemDiscountAmount: Number(values[ORDER_COLUMN.ITEM_DISCOUNT_AMOUNT - 1]) || 0,
       subtotal: Number(values[ORDER_COLUMN.SUBTOTAL - 1]) || 0,
-      orderDiscountPct: Number(values[ORDER_COLUMN.ORDER_DISCOUNT_PCT - 1]) || 0,
+      orderDiscountMode: savedDiscount.mode,
+      orderDiscountValue: savedDiscount.value,
+      orderDiscountPct: savedDiscount.pct,
       orderDiscountAmount: Number(values[ORDER_COLUMN.ORDER_DISCOUNT_AMOUNT - 1]) || 0,
       total: Number(values[ORDER_COLUMN.TOTAL - 1]) || 0,
     },
@@ -595,10 +658,24 @@ function responseTotals_(order) {
     grossSubtotal: fromPence_(order.grossSubtotalPence),
     itemDiscountAmount: fromPence_(order.itemDiscountPence),
     subtotal: fromPence_(order.subtotalPence),
+    orderDiscountMode: order.orderDiscountMode,
+    orderDiscountValue: order.orderDiscountValue,
     orderDiscountPct: order.orderDiscountPct,
     orderDiscountAmount: fromPence_(order.orderDiscountPence),
     total: fromPence_(order.totalPence),
   };
+}
+
+function readSavedOrderDiscount_(values) {
+  var rawPercentage = values[ORDER_COLUMN.ORDER_DISCOUNT_PCT - 1];
+  var percentage = Number(rawPercentage) || 0;
+  var amount = Number(values[ORDER_COLUMN.ORDER_DISCOUNT_AMOUNT - 1]) || 0;
+
+  if (percentage > 0) return { mode: 'pct', value: percentage, pct: percentage };
+  if ((rawPercentage === '' || rawPercentage === null) && amount > 0) {
+    return { mode: 'fixed', value: amount, pct: 0 };
+  }
+  return { mode: '', value: 0, pct: 0 };
 }
 
 function responseItemsFromCalculated_(lines) {
@@ -735,6 +812,7 @@ function updateEmailState_(ordersSheet, rowNumber, status, sentAt, errorMessage)
 function loadSavedOrder_(sheets, existingOrder) {
   var values = existingOrder.values;
   var orderRef = String(values[ORDER_COLUMN.ORDER_REF - 1]);
+  var savedDiscount = readSavedOrderDiscount_(values);
   var lastItemRow = sheets.orderItems.getLastRow();
   var lines = [];
 
@@ -780,7 +858,9 @@ function loadSavedOrder_(sheets, existingOrder) {
     grossSubtotal: Number(values[ORDER_COLUMN.GROSS_SUBTOTAL - 1]),
     itemDiscountAmount: Number(values[ORDER_COLUMN.ITEM_DISCOUNT_AMOUNT - 1]),
     subtotal: Number(values[ORDER_COLUMN.SUBTOTAL - 1]),
-    orderDiscountPct: Number(values[ORDER_COLUMN.ORDER_DISCOUNT_PCT - 1]),
+    orderDiscountMode: savedDiscount.mode,
+    orderDiscountValue: savedDiscount.value,
+    orderDiscountPct: savedDiscount.pct,
     orderDiscountAmount: Number(values[ORDER_COLUMN.ORDER_DISCOUNT_AMOUNT - 1]),
     total: Number(values[ORDER_COLUMN.TOTAL - 1]),
     orderStatus: String(values[ORDER_COLUMN.ORDER_STATUS - 1]),
@@ -818,7 +898,7 @@ function buildOrderDocumentHtml_(order, forPdf) {
   }
   if (order.orderDiscountAmount > 0) {
     discountTotals += totalRowHtml_(
-      'Order discount (' + formatNumber_(order.orderDiscountPct) + '%)',
+      formatSavedOrderDiscount_(order),
       '-' + formatMoney_(order.orderDiscountAmount),
       false
     );
@@ -895,7 +975,13 @@ function buildOrderEmailText_(order) {
     );
   });
 
-  lines.push('', 'ORDER TOTAL: ' + formatMoney_(order.total));
+  lines.push('', 'Subtotal after item discounts: ' + formatMoney_(order.subtotal));
+  if (order.orderDiscountAmount > 0) {
+    lines.push(
+      formatSavedOrderDiscount_(order) + ': -' + formatMoney_(order.orderDiscountAmount)
+    );
+  }
+  lines.push('ORDER TOTAL: ' + formatMoney_(order.total));
   if (order.customer.notes) lines.push('', 'Notes: ' + order.customer.notes);
   lines.push('', 'The PDF order confirmation is attached.');
   return lines.join('\n');
@@ -905,6 +991,11 @@ function formatSavedDiscount_(line) {
   if (!line.discountMode || !line.discountAmount) return 'None';
   if (line.discountMode === 'pct') return formatNumber_(line.discountValue) + '%';
   return formatMoney_(Number(line.discountValue)) + ' per unit';
+}
+
+function formatSavedOrderDiscount_(order) {
+  if (order.orderDiscountMode === 'fixed') return 'Order discount (fixed)';
+  return 'Order discount (' + formatNumber_(order.orderDiscountPct) + '%)';
 }
 
 function formatMoney_(value) {

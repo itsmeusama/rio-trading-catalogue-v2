@@ -41,15 +41,18 @@ async function run() {
   const api = context.RioOrderApi;
   const storage = memoryStorage();
   const baseRequest = {
-    contractVersion: 1,
+    contractVersion: 2,
     customer: { shopName: 'Corner Shop', contactName: 'John', phone: '07700900123', email: 'a@b.co', notes: '' },
     items: [{ productId: '1', quantity: 2, discount: null }],
-    orderDiscountPct: 0,
+    orderDiscount: null,
   };
 
   const fingerprint = await api.fingerprintPayload(baseRequest);
   const sameFingerprint = await api.fingerprintPayload(JSON.parse(JSON.stringify(baseRequest)));
-  const changedFingerprint = await api.fingerprintPayload({ ...baseRequest, orderDiscountPct: 5 });
+  const changedFingerprint = await api.fingerprintPayload({
+    ...baseRequest,
+    orderDiscount: { mode: 'fixed', value: 5 },
+  });
   assert.equal(fingerprint, sameFingerprint);
   assert.notEqual(fingerprint, changedFingerprint);
 
@@ -70,7 +73,8 @@ async function run() {
     emailStatus: 'Sent',
     totals: {
       currency: 'GBP', grossSubtotal: 20, itemDiscountAmount: 2,
-      subtotal: 18, orderDiscountPct: 5, orderDiscountAmount: 0.9, total: 17.1,
+      subtotal: 18, orderDiscountMode: 'fixed', orderDiscountValue: 0.9,
+      orderDiscountPct: 0, orderDiscountAmount: 0.9, total: 17.1,
     },
     items: [{
       productId: '1', name: 'Tea', unit: 'case', quantity: 2, unitPrice: 10,
@@ -98,7 +102,22 @@ async function run() {
   assert.equal(orderData.orderRef, responsePayload.orderRef);
   assert.equal(orderData.items[0].discountLabel, '10% off');
   assert.equal(orderData.total, 17.1);
+  assert.equal(orderData.orderDiscountMode, 'fixed');
+  assert.equal(orderData.orderDiscountValue, 0.9);
+  assert.equal(orderData.orderDiscountAmt, 0.9);
   assert.equal(orderData.emailStatus, 'Sent');
+
+  const legacyPercentageData = api.toOrderData({
+    ...responsePayload,
+    totals: {
+      ...responsePayload.totals,
+      orderDiscountMode: undefined,
+      orderDiscountValue: undefined,
+      orderDiscountPct: 5,
+    },
+  }, baseRequest.customer, []);
+  assert.equal(legacyPercentageData.orderDiscountMode, 'pct');
+  assert.equal(legacyPercentageData.orderDiscountValue, 5);
 
   await assert.rejects(
     api.postOrder(

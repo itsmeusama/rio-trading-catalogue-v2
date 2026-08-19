@@ -70,10 +70,34 @@ cutover belongs to Phase 3, together with Apps Script PDF/email delivery.
 Phase 3 has now been implemented separately. Continue with
 [`PHASE-3.md`](PHASE-3.md) after the Phase 2 persistence test passes.
 
-## Request accepted by the Phase 2 endpoint
+## Request contracts accepted by the current endpoint
 
-The backend accepts the versioned request documented in
-[`docs/order-system-phase-1.md`](../docs/order-system-phase-1.md). It trusts only
-product IDs, quantities, and discount instructions from the browser. Product
-names, categories, units, and prices are reloaded from the product tab before
-the order is saved.
+The current backend remains backward compatible with the original version-1
+request documented in
+[`docs/order-system-phase-1.md`](../docs/order-system-phase-1.md). Version 1
+supports the legacy `orderDiscountPct` field.
+
+The current frontend uses version 2. Its whole-order discount is either `null`
+or an explicit mode/value object:
+
+```json
+{
+  "contractVersion": 2,
+  "orderDiscount": {
+    "mode": "fixed",
+    "value": 10
+  }
+}
+```
+
+`mode` may be `pct` or `fixed`. The fixed value is GBP applied once after all
+item discounts; it must not exceed the authoritative subtotal. Only one of the
+two contract shapes is accepted in a request, preventing ambiguous totals.
+
+No new spreadsheet columns are required. For a percentage discount,
+`order_discount_pct` contains the percentage. For a fixed discount it remains
+blank. `order_discount_amount` always stores the actual GBP amount deducted.
+
+For both versions, the backend trusts only product IDs, quantities, and
+discount instructions from the browser. Product names, categories, units, and
+prices are reloaded from the product tab before the order is saved.

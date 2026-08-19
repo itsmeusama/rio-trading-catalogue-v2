@@ -1,5 +1,10 @@
 # Permanent Order System — Phase 1 Contract
 
+> Historical baseline: this document records the original version-1,
+> percentage-only API design. The implemented backend now also accepts the
+> version-2 percentage/fixed whole-order discount contract documented in
+> [`apps-script/README.md`](../apps-script/README.md).
+
 This document fixes the data and API contract for the planned Google Apps Script
 order backend. Phase 1 is specification only: it does not change the current
 frontend, create spreadsheet tabs, deploy Apps Script, or remove EmailJS.

@@ -184,10 +184,16 @@
         <div class="order-disc-row">
           <span class="order-disc-label">Order discount</span>
           <div class="order-disc-controls">
+            <div class="discount-toggle-btns" aria-label="Order discount type">
+              <button class="disc-mode-btn order-disc-mode-btn active" type="button"
+                data-mode="pct" aria-pressed="true" aria-label="Percentage order discount">%</button>
+              <button class="disc-mode-btn order-disc-mode-btn" type="button"
+                data-mode="fixed" aria-pressed="false" aria-label="Fixed order discount">£</button>
+            </div>
             <div class="order-disc-input-wrap">
               <input class="order-disc-input" type="number" id="orderDiscInput"
-                min="0" max="100" step="0.1" placeholder="0" aria-label="Order discount %" />
-              <span class="order-disc-pct-sign">%</span>
+                min="0" max="100" step="0.1" placeholder="0–100" aria-label="Percentage order discount" />
+              <span class="order-disc-unit" id="orderDiscUnit">%</span>
             </div>
             <span class="order-disc-saving hidden" id="orderDiscSaving"></span>
             <button class="order-disc-clear" id="orderDiscClear" type="button" aria-label="Remove order discount">&times;</button>
