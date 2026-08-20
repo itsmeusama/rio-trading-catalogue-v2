@@ -1147,6 +1147,7 @@ async function submitOrder() {
       messages.push('The order is safely saved and its email is still being processed.');
     }
 
+    clearCompletedOrder();
     resetSendBtn();
     showResult('success', orderData, messages.join(' '));
   } catch (err) {
@@ -1237,16 +1238,13 @@ function showResult(type, orderData, detail) {
   }
 }
 
-function placeAnotherOrder() {
-  cart          = {};
-  discounts     = {};
-  orderDiscount = null;
-  if (window.RioOrderApi) RioOrderApi.clearSubmission(localStorage);
+function resetOrderDiscountControls() {
   const discInput  = document.getElementById('orderDiscInput');
   const discPanel  = document.getElementById('orderDiscPanel');
   const discAddBtn = document.getElementById('orderDiscAddBtn');
   const discUnit   = document.getElementById('orderDiscUnit');
   const modeBtns   = document.querySelectorAll('.order-disc-mode-btn');
+
   if (discInput)  discInput.value = '';
   if (discInput) {
     discInput.max = '100';
@@ -1262,15 +1260,31 @@ function placeAnotherOrder() {
   });
   if (discPanel)  discPanel.classList.remove('open');
   if (discAddBtn) discAddBtn.classList.remove('hidden');
-  saveCart();
+}
+
+function clearCompletedOrder() {
+  cart          = {};
+  discounts     = {};
+  orderDiscount = null;
+  if (window.RioOrderApi) RioOrderApi.clearSubmission(localStorage);
+  try {
+    localStorage.removeItem('rioTradingCart');
+  } catch (error) {
+    // The in-memory cart is already clear if storage is unavailable.
+  }
+  resetOrderDiscountControls();
   updateCartUI();
-  closeAll();
   renderGrid();
   orderForm.reset();
   ['shopName','contactName','phone','email'].forEach(id => {
     document.getElementById(id).classList.remove('invalid');
     document.getElementById(id + 'Err').classList.add('hidden');
   });
+}
+
+function placeAnotherOrder() {
+  clearCompletedOrder();
+  closeAll();
 }
 
 /* ============================================================
