@@ -234,28 +234,6 @@ function cartSubtotalBeforeOrderDiscount() {
   return RioMoney.calculateOrder(lines, null).subtotalPence;
 }
 
-function clampFixedOrderDiscountToSubtotal() {
-  const input = document.getElementById('orderDiscInput');
-  const fixedButton = document.querySelector('.order-disc-mode-btn[data-mode="fixed"]');
-  const subtotalPence = cartSubtotalBeforeOrderDiscount();
-
-  if (input && fixedButton && fixedButton.classList.contains('active')) {
-    input.max = RioMoney.fromPence(subtotalPence).toFixed(2);
-  }
-  if (!orderDiscount || orderDiscount.mode !== 'fixed') return;
-
-  const fixedPence = Math.min(subtotalPence, RioMoney.toPence(orderDiscount.value));
-  const nextDiscount = fixedPence > 0
-    ? { mode: 'fixed', value: RioMoney.fromPence(fixedPence) }
-    : null;
-  const changed = !nextDiscount || nextDiscount.value !== orderDiscount.value;
-  if (!changed) return;
-
-  orderDiscount = nextDiscount;
-  if (input) input.value = nextDiscount ? nextDiscount.value.toFixed(2) : '';
-  saveCart();
-}
-
 function formatDiscountLabel(d) {
   if (!d || !d.value) return '+ Discount';
   return d.mode === 'pct'
@@ -270,6 +248,73 @@ function fmt(n) {
 
 function fmtPence(pence) {
   return RioMoney.formatPence(pence);
+}
+
+function getDiscountValidationResult(rawValue, mode, maxPence, maximumMessage) {
+  const raw = String(rawValue || '').trim();
+  if (!raw) return { valid: true, value: 0, error: '' };
+
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return { valid: false, value: 0, error: 'Enter a valid discount value.' };
+  }
+  if (value < 0) {
+    return { valid: false, value: 0, error: 'Discount cannot be negative.' };
+  }
+  if (mode === 'pct') {
+    if (value > 100) {
+      return { valid: false, value: 0, error: 'Enter a percentage from 0 to 100.' };
+    }
+    return { valid: true, value, error: '' };
+  }
+
+  const valuePence = RioMoney.toPence(value);
+  if (valuePence > maxPence) {
+    return { valid: false, value: 0, error: maximumMessage };
+  }
+  return { valid: true, value: RioMoney.fromPence(valuePence), error: '' };
+}
+
+function setDiscountInputError(input, errorElement, message) {
+  const hasError = Boolean(message);
+  input.classList.toggle('discount-input--invalid', hasError);
+  input.setAttribute('aria-invalid', String(hasError));
+  if (!errorElement) return;
+  errorElement.textContent = message || '';
+  errorElement.classList.toggle('hidden', !hasError);
+}
+
+function validateDiscountField(input, errorElement, mode, maxPence, maximumMessage) {
+  const hasBadInput = Boolean(input.validity && input.validity.badInput);
+  const result = hasBadInput
+    ? { valid: false, value: 0, error: 'Enter a valid discount value.' }
+    : getDiscountValidationResult(input.value, mode, maxPence, maximumMessage);
+  setDiscountInputError(input, errorElement, result.error);
+  return result;
+}
+
+function hasDiscountValidationErrors() {
+  return Boolean(document.querySelector('.discount-input--invalid'));
+}
+
+function validateOrderDiscountInput() {
+  const input = document.getElementById('orderDiscInput');
+  const errorElement = document.getElementById('orderDiscError');
+  const activeModeButton = document.querySelector('.order-disc-mode-btn.active');
+  const mode = activeModeButton && activeModeButton.dataset.mode === 'fixed' ? 'fixed' : 'pct';
+  const subtotalPence = cartSubtotalBeforeOrderDiscount();
+
+  if (mode === 'fixed') {
+    input.max = RioMoney.fromPence(subtotalPence).toFixed(2);
+  }
+
+  return validateDiscountField(
+    input,
+    errorElement,
+    mode,
+    subtotalPence,
+    'Maximum order discount is ' + fmtPence(subtotalPence) + '.'
+  );
 }
 
 function formatDiscountedUnit(line) {
@@ -567,7 +612,7 @@ function updateCartUI() {
     cartIconCount.classList.add('hidden');
   }
 
-  proceedBtn.disabled = count === 0;
+  proceedBtn.disabled = count === 0 || hasDiscountValidationErrors();
 
   if (count > prevCartCount) bounceCartIcon();
   prevCartCount = count;
@@ -676,6 +721,11 @@ function buildCartRow(product, qty) {
       <span class="disc-saving${hasDisc ? ' disc-saving--active' : ''}"></span>
       <button class="disc-clear" aria-label="Remove discount">&times;</button>
     </div>`;
+  const discError = document.createElement('span');
+  discError.className = 'discount-validation-error hidden';
+  discError.setAttribute('role', 'status');
+  discError.setAttribute('aria-live', 'polite');
+  discRow.appendChild(discError);
 
   wrap.appendChild(row);
   wrap.appendChild(discRow);
@@ -692,6 +742,15 @@ function buildCartRow(product, qty) {
   const discSaving = discRow.querySelector('.disc-saving');
   const discClear  = discRow.querySelector('.disc-clear');
   const modeBtns   = discRow.querySelectorAll('.disc-mode-btn');
+
+  function setDiscountMode(mode) {
+    const isPercentage = mode === 'pct';
+    discInput.max = isPercentage ? '100' : RioMoney.fromPence(product.pricePence).toFixed(2);
+    discInput.step = isPercentage ? '0.1' : '0.01';
+    discInput.placeholder = isPercentage ? '0–100' : '0.00';
+    discInput.setAttribute('aria-label', isPercentage ? 'Percentage item discount' : 'Fixed item discount');
+  }
+  setDiscountMode(initMode);
 
   /* Seed price line + saving text if discount already active on open */
   if (hasDisc && existingDisc) {
@@ -721,13 +780,18 @@ function buildCartRow(product, qty) {
     const q      = parseInt(qtyInput.value, 10) || 1;
     const activeBtn = discRow.querySelector('.disc-mode-btn.active');
     const mode      = activeBtn ? activeBtn.dataset.mode : 'pct';
-    let val      = parseFloat(discInput.value);
-    if (isNaN(val) || val < 0) val = 0;
-    if (mode === 'pct')   val = Math.min(100, val);
-    if (mode === 'fixed') {
-      const fixedPence = Math.min(product.pricePence, Math.max(0, RioMoney.toPence(val)));
-      val = RioMoney.fromPence(fixedPence);
+    const validation = validateDiscountField(
+      discInput,
+      discError,
+      mode,
+      product.pricePence,
+      'Maximum discount for this item is ' + fmtPence(product.pricePence) + '.'
+    );
+    if (!validation.valid) {
+      updateCartUI();
+      return;
     }
+    const val = validation.value;
 
     if (val > 0) {
       discounts[product.id] = { mode, value: val };
@@ -757,6 +821,7 @@ function buildCartRow(product, qty) {
     discTrigger.classList.toggle('disc-trigger--active', !!activeDisc);
 
     refreshDrawerTotals();
+    updateCartUI();
   }
 
   /* ---- Qty stepper events ---- */
@@ -777,6 +842,10 @@ function buildCartRow(product, qty) {
   /* ---- Discount trigger toggle ---- */
   discTrigger.addEventListener('click', () => {
     const isOpen = !discRow.classList.contains('discount-row--hidden');
+    if (isOpen && discInput.classList.contains('discount-input--invalid')) {
+      discInput.focus();
+      return;
+    }
     discRow.classList.toggle('discount-row--hidden', isOpen);
     discTrigger.setAttribute('aria-expanded', String(!isOpen));
     if (!isOpen) discInput.focus();
@@ -788,7 +857,7 @@ function buildCartRow(product, qty) {
       const newMode = btn.dataset.mode;
       discounts[product.id] = { mode: newMode, value: 0 };
       discInput.value = '';
-      discInput.placeholder = newMode === 'pct' ? '0–100' : '0.00';
+      setDiscountMode(newMode);
       modeBtns.forEach(b => b.classList.toggle('active', b.dataset.mode === newMode));
       saveCart();
       refreshDiscount();
@@ -802,6 +871,7 @@ function buildCartRow(product, qty) {
   discClear.addEventListener('click', () => {
     delete discounts[product.id];
     discInput.value = '';
+    setDiscountInputError(discInput, discError, '');
     origPrice.classList.remove('cart-item-orig-price--struck');
     discPrice.textContent = '';
     discSaving.textContent = '';
@@ -814,6 +884,7 @@ function buildCartRow(product, qty) {
     lineTotal.textContent = fmtPence(product.pricePence * q);
     saveCart();
     refreshDrawerTotals();
+    updateCartUI();
   });
 
   /* ---- Remove item ---- */
@@ -828,13 +899,17 @@ function buildCartRow(product, qty) {
     if (cartItemCount() === 0) drawerEmpty.classList.remove('hidden');
   });
 
+  if (hasDisc) refreshDiscount();
+
   return wrap;
 }
 
 function refreshDrawerTotals() {
-  clampFixedOrderDiscountToSubtotal();
+  validateOrderDiscountInput();
   const count  = cartItemCount();
   const totals = calculateCartTotals();
+
+  proceedBtn.disabled = count === 0 || hasDiscountValidationErrors();
 
   drawerSubtitle.textContent = count + ' item' + (count !== 1 ? 's' : '') + ' \u00B7 ' + fmtPence(totals.totalPence);
   drawerTotal.textContent    = fmtPence(totals.totalPence);
@@ -1099,7 +1174,13 @@ async function submitOrder() {
   try {
     if (!window.RioOrderApi) throw new Error('The order service client did not load.');
 
-    clampFixedOrderDiscountToSubtotal();
+    const orderDiscountValidation = validateOrderDiscountInput();
+    if (!orderDiscountValidation.valid || hasDiscountValidationErrors()) {
+      resetSendBtn();
+      formDrawer.classList.add('hidden');
+      openOrderDrawer();
+      return;
+    }
     const calculatedPreview = calculateCartTotals();
     const requestOrderDiscount = calculatedPreview.orderDiscountPence > 0
       ? {
@@ -1553,6 +1634,7 @@ function initOrderDiscountUI() {
   const addBtn   = document.getElementById('orderDiscAddBtn');
   const panel    = document.getElementById('orderDiscPanel');
   const unit     = document.getElementById('orderDiscUnit');
+  const errorElement = document.getElementById('orderDiscError');
   const modeBtns = Array.from(document.querySelectorAll('.order-disc-mode-btn'));
   let selectedMode = orderDiscount ? orderDiscount.mode : 'pct';
 
@@ -1577,6 +1659,7 @@ function initOrderDiscountUI() {
       input.setAttribute('aria-label', 'Fixed order discount');
       unit.textContent = '£';
     }
+    setDiscountInputError(input, errorElement, '');
   }
 
   function openPanel() {
@@ -1623,29 +1706,21 @@ function initOrderDiscountUI() {
   });
 
   input.addEventListener('input', () => {
-    let val = parseFloat(input.value);
-    if (isNaN(val) || val < 0) val = 0;
-    if (selectedMode === 'pct') {
-      if (val > 100) input.value = '100';
-      val = Math.min(100, val);
-    } else {
-      const subtotalPence = cartSubtotalBeforeOrderDiscount();
-      const requestedPence = Math.max(0, RioMoney.toPence(val));
-      const fixedPence = Math.min(subtotalPence, requestedPence);
-      if (requestedPence > subtotalPence) {
-        input.value = RioMoney.fromPence(fixedPence).toFixed(2);
-      }
-      val = RioMoney.fromPence(fixedPence);
+    const validation = validateOrderDiscountInput();
+    if (!validation.valid) {
+      updateCartUI();
+      return;
     }
 
-    orderDiscount = val > 0 ? { mode: selectedMode, value: val } : null;
+    orderDiscount = validation.value > 0 ? { mode: selectedMode, value: validation.value } : null;
     saveCart();
     refreshDrawerTotals();
     updateCartUI();
   });
 
   input.addEventListener('blur', () => {
-    if (orderDiscount && orderDiscount.mode === 'fixed') {
+    const validation = validateOrderDiscountInput();
+    if (validation.valid && orderDiscount && orderDiscount.mode === 'fixed') {
       input.value = Number(orderDiscount.value).toFixed(2);
     }
   });
@@ -1663,8 +1738,9 @@ function initEvents() {
   drawerBackdrop.addEventListener('click', closeAll);
 
   proceedBtn.addEventListener('click', () => {
-    if (!hasValidCartItems()) {
+    if (!hasValidCartItems() || hasDiscountValidationErrors()) {
       renderOrderDrawer();
+      updateCartUI();
       return;
     }
     orderDrawer.classList.add('hidden');
