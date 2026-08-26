@@ -15,7 +15,7 @@ The project deliberately uses plain HTML, CSS, and JavaScript. There is no front
 7. Apps Script reloads the authoritative product sheet, validates the request, and recalculates every commercial value in integer pennies.
 8. The accepted order is saved permanently in the `Orders` and `Order Items` sheets before email delivery is attempted.
 9. Apps Script generates a unique order reference and sends the fixed owner address an email containing the order details and an attached Order Confirmation PDF.
-10. The browser shows the saved order result and allows the owner to download another copy of the Order Confirmation PDF.
+10. The browser shows the saved order result and can securely request the same canonical Order Confirmation PDF from Apps Script for download.
 
 The retailer's email is currently stored with the order but is not sent a confirmation automatically.
 
@@ -52,15 +52,16 @@ The retailer's email is currently stored with the order but is not sent a confir
 - Formula-safe spreadsheet writes for customer-entered and saved text
 - Fixed owner recipient configured in Apps Script; browser-supplied recipients are rejected
 - Owner email containing order details and a server-generated PDF attachment
+- Secured PDF downloads requiring the matching permanent order reference and submission ID
 - Email status tracking as `Pending`, `Sent`, or `Failed`
 - Order status starting as `Open`, with `Delivered` and `Cancelled` available for owner updates
 
 ### Order Confirmation
 
 - Consistent **Order Confirmation** naming in the interface and generated documents
-- Server-generated PDF attached to the owner email
-- Browser-generated downloadable PDF after a successful submission
-- Both documents use the permanent reference and authoritative saved order values
+- One canonical Apps Script PDF implementation for both the owner email attachment and browser download
+- Net unit price, item discounts, order discount and authoritative line/order totals
+- No PDF storage in Google Drive and no browser PDF-generation dependency
 
 ## Architecture
 
@@ -70,10 +71,11 @@ Published Google Sheet CSV ──> Static catalogue in the browser
                                       │ order request
                                       ▼
                               Google Apps Script
-                               │       │       │
-                               │       │       └──> Owner email + PDF
-                               │       └──────────> Order Items sheet
-                               └──────────────────> Orders sheet
+                               │       │       │       │
+                               │       │       │       └──> Owner email + PDF
+                               │       │       └──────────> Secured PDF download
+                               │       └──────────────────> Order Items sheet
+                               └──────────────────────────> Orders sheet
 ```
 
 The browser is responsible for interaction and an immediate preview. Apps Script is the commercial authority: it ignores browser-calculated prices and totals, reloads products from the native spreadsheet, recalculates the order, saves it, and returns the accepted values.
@@ -84,8 +86,7 @@ The browser is responsible for interaction and an immediate preview. Apps Script
 - CSS3
 - Plain JavaScript
 - Google Sheets published CSV for catalogue delivery
-- Google Apps Script for order validation, permanent storage, PDF generation, and email
-- jsPDF and jsPDF AutoTable for the browser-downloadable Order Confirmation
+- Google Apps Script for order validation, permanent storage, canonical PDF generation, secured PDF download, and email
 - Google Fonts (`Inter`)
 - No npm dependencies, framework, bundler, or build process
 
@@ -150,7 +151,7 @@ const CONFIG = {
 
 - `SHEET_CSV_URL` must point to the published CSV for the product tab.
 - `ORDER_API_URL` must point to the deployed Apps Script web app ending in `/exec`.
-- Business display values affect the catalogue and browser-generated PDF.
+- Business display values affect the catalogue; canonical Order Confirmation content is defined in `apps-script/Code.gs`.
 - The owner email address is intentionally configured only in `apps-script/Code.gs`.
 
 Do not place secret credentials in frontend files. Everything delivered to the browser, including both endpoint URLs, is publicly inspectable.
@@ -211,6 +212,7 @@ Run the complete automated suite from the project root:
 ```bash
 node tests/money.test.js
 node tests/order-api.test.js
+node tests/pdf-download.test.js
 node apps-script/tests/run-tests.js
 ```
 
@@ -223,7 +225,7 @@ The tests cover:
 - Server validation and authoritative price calculation
 - Permanent row creation and recovery behaviour
 - Spreadsheet formula-injection protection
-- PDF content and email status handling
+- Canonical PDF content, secured download responses, browser file saving, and email status handling
 
 `Phase2Test.gs` and `Phase3Test.gs` also provide manual Apps Script checks that can be run from the Apps Script editor against the configured workbook.
 

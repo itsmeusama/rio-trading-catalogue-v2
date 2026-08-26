@@ -86,14 +86,26 @@
     }
   }
 
-  async function postOrder(url, payload, options) {
+  function assertServiceUrl_(url) {
     if (!url || !/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url)) {
       throw new Error('The order service is not configured correctly.');
     }
+  }
+
+  function responseError_(data, fallbackMessage, fallbackCode) {
+    var error = new Error(data && data.message ? data.message : fallbackMessage);
+    error.code = data && data.code ? data.code : fallbackCode;
+    error.response = data;
+    return error;
+  }
+
+  async function postJson_(url, payload, options, messages) {
+    assertServiceUrl_(url);
 
     options = options || {};
+    messages = messages || {};
     var fetchImpl = options.fetchImpl || global.fetch;
-    if (typeof fetchImpl !== 'function') throw new Error('This browser cannot send the order request.');
+    if (typeof fetchImpl !== 'function') throw new Error('This browser cannot contact the order service.');
 
     var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     var timeoutMs = options.timeoutMs || 45000;
@@ -113,25 +125,26 @@
       try {
         data = JSON.parse(text);
       } catch (error) {
-        throw new Error('The order service returned an unreadable response.');
+        throw new Error(messages.unreadable || 'The order service returned an unreadable response.');
       }
 
-      if (!response.ok || !data || data.ok !== true || data.saved !== true) {
-        var requestError = new Error(data && data.message ? data.message : 'The order was not accepted.');
-        requestError.code = data && data.code ? data.code : 'ORDER_REJECTED';
-        requestError.response = data;
-        throw requestError;
+      if (!response.ok || !data || data.ok !== true) {
+        throw responseError_(
+          data,
+          messages.rejected || 'The request was not accepted.',
+          messages.rejectedCode || 'REQUEST_REJECTED'
+        );
       }
       return data;
     } catch (error) {
       if (error && error.name === 'AbortError') {
-        throw new Error('The order request timed out. Please retry; the same order will not be duplicated.');
+        throw new Error(messages.timeout || 'The request timed out. Please try again.');
       }
       if (error && error.response) throw error;
       var networkError = new Error(
         error && error.message
           ? error.message
-          : 'The order service could not be reached. Check the connection and try again.'
+          : (messages.network || 'The order service could not be reached. Check the connection and try again.')
       );
       networkError.cause = error;
       throw networkError;
@@ -140,13 +153,77 @@
     }
   }
 
+  async function postOrder(url, payload, options) {
+    var data = await postJson_(url, payload, options, {
+      rejected: 'The order was not accepted.',
+      rejectedCode: 'ORDER_REJECTED',
+      unreadable: 'The order service returned an unreadable response.',
+      timeout: 'The order request timed out. Please retry; the same order will not be duplicated.',
+      network: 'The order service could not be reached. Check the connection and try again.',
+    });
+
+    if (data.saved !== true) {
+      throw responseError_(data, 'The order was not accepted.', 'ORDER_REJECTED');
+    }
+    return data;
+  }
+
+  async function requestOrderPdf(url, orderRef, submissionId, options) {
+    var data = await postJson_(url, {
+      action: 'downloadOrderPdf',
+      orderRef: orderRef,
+      submissionId: submissionId,
+    }, options, {
+      rejected: 'The Order Confirmation could not be downloaded.',
+      rejectedCode: 'PDF_DOWNLOAD_FAILED',
+      unreadable: 'The PDF service returned an unreadable response.',
+      timeout: 'The PDF download timed out. Your order is safely saved; please try again.',
+      network: 'The PDF service could not be reached. Check the connection and try again.',
+    });
+
+    if (
+      data.action !== 'downloadOrderPdf' ||
+      data.orderRef !== orderRef ||
+      data.mimeType !== 'application/pdf' ||
+      typeof data.fileName !== 'string' ||
+      !/^Rio-Trading-Order-Confirmation-ORD-[0-9]{8}-[A-F0-9]{5}\.pdf$/.test(data.fileName) ||
+      typeof data.pdfBase64 !== 'string' ||
+      data.pdfBase64.length === 0
+    ) {
+      throw new Error('The PDF service returned an incomplete response.');
+    }
+
+    return data;
+  }
+
+  function decodePdfPayload(payload) {
+    var binary;
+    try {
+      binary = global.atob(payload.pdfBase64);
+    } catch (error) {
+      throw new Error('The downloaded PDF data is invalid.');
+    }
+
+    if (binary.slice(0, 5) !== '%PDF-') {
+      throw new Error('The downloaded file is not a valid PDF.');
+    }
+
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return {
+      fileName: payload.fileName,
+      mimeType: payload.mimeType,
+      bytes: bytes,
+    };
+  }
+
   function discountLabel(item) {
     if (!item.discountMode || !Number(item.discountAmount)) return null;
     if (item.discountMode === 'pct') return Number(item.discountValue) + '% off';
     return '£' + Number(item.discountValue).toFixed(2) + ' off';
   }
 
-  function toOrderData(response, customer, fallbackItems) {
+  function toOrderData(response, customer, fallbackItems, submissionId) {
     if (!response || !response.orderRef || !response.totals) {
       throw new Error('The saved order response is incomplete.');
     }
@@ -205,6 +282,7 @@
       orderStatus: response.orderStatus,
       emailStatus: response.emailStatus,
       duplicate: response.duplicate === true,
+      downloadSubmissionId: String(submissionId || ''),
     };
   }
 
@@ -214,6 +292,8 @@
     getOrCreateSubmissionId: getOrCreateSubmissionId,
     clearSubmission: clearSubmission,
     postOrder: postOrder,
+    requestOrderPdf: requestOrderPdf,
+    decodePdfPayload: decodePdfPayload,
     toOrderData: toOrderData,
   });
 })(typeof globalThis !== 'undefined' ? globalThis : window);
