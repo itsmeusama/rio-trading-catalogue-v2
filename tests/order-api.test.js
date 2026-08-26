@@ -24,6 +24,7 @@ const context = vm.createContext({
   setTimeout,
   clearTimeout,
   AbortController,
+  atob: value => Buffer.from(value, 'base64').toString('binary'),
   crypto: require('node:crypto').webcrypto,
 });
 new vm.Script(source, { filename: 'order-api.js' }).runInContext(context);
@@ -98,7 +99,7 @@ async function run() {
   assert.equal(posted.options.headers, undefined, 'request must avoid CORS-preflight headers');
   assert.equal(JSON.parse(posted.options.body).submissionId, firstId);
 
-  const orderData = api.toOrderData(responsePayload, baseRequest.customer, []);
+  const orderData = api.toOrderData(responsePayload, baseRequest.customer, [], firstId);
   assert.equal(orderData.orderRef, responsePayload.orderRef);
   assert.equal(orderData.items[0].discountLabel, '10% off');
   assert.equal(orderData.total, 17.1);
@@ -106,6 +107,65 @@ async function run() {
   assert.equal(orderData.orderDiscountValue, 0.9);
   assert.equal(orderData.orderDiscountAmt, 0.9);
   assert.equal(orderData.emailStatus, 'Sent');
+  assert.equal(orderData.downloadSubmissionId, firstId);
+
+  const pdfBase64 = Buffer.from('%PDF-1.4\nTest PDF\n%%EOF', 'binary').toString('base64');
+  let pdfPosted = null;
+  const pdfPayload = await api.requestOrderPdf(
+    'https://script.google.com/macros/s/test-deployment/exec',
+    responsePayload.orderRef,
+    firstId,
+    {
+      fetchImpl: async (url, options) => {
+        pdfPosted = { url, options };
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            ok: true,
+            action: 'downloadOrderPdf',
+            orderRef: responsePayload.orderRef,
+            fileName: `Rio-Trading-Order-Confirmation-${responsePayload.orderRef}.pdf`,
+            mimeType: 'application/pdf',
+            pdfBase64,
+          }),
+        };
+      },
+    }
+  );
+  const decodedPdf = api.decodePdfPayload(pdfPayload);
+  assert.equal(pdfPosted.options.method, 'POST');
+  assert.equal(pdfPosted.options.headers, undefined, 'PDF request must also avoid CORS-preflight headers');
+  assert.deepEqual(JSON.parse(pdfPosted.options.body), {
+    action: 'downloadOrderPdf',
+    orderRef: responsePayload.orderRef,
+    submissionId: firstId,
+  });
+  assert.equal(decodedPdf.fileName, `Rio-Trading-Order-Confirmation-${responsePayload.orderRef}.pdf`);
+  assert.equal(Buffer.from(decodedPdf.bytes).toString('binary'), '%PDF-1.4\nTest PDF\n%%EOF');
+
+  await assert.rejects(
+    api.requestOrderPdf(
+      'https://script.google.com/macros/s/test-deployment/exec',
+      responsePayload.orderRef,
+      firstId,
+      {
+        fetchImpl: async () => ({
+          ok: true,
+          text: async () => JSON.stringify({
+            ok: false,
+            action: 'downloadOrderPdf',
+            code: 'PDF_NOT_AVAILABLE',
+            message: 'This Order Confirmation is not available for download.',
+          }),
+        }),
+      }
+    ),
+    error => error.code === 'PDF_NOT_AVAILABLE'
+  );
+  assert.throws(
+    () => api.decodePdfPayload({ ...pdfPayload, pdfBase64: Buffer.from('not a pdf').toString('base64') }),
+    /not a valid PDF/
+  );
 
   const legacyPercentageData = api.toOrderData({
     ...responsePayload,

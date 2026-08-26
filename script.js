@@ -1215,7 +1215,7 @@ async function submitOrder() {
       orderDiscount: requestWithoutId.orderDiscount,
     });
 
-    const orderData = RioOrderApi.toOrderData(response, customer, fallbackItems);
+    const orderData = RioOrderApi.toOrderData(response, customer, fallbackItems, submissionId);
     lastOrderData = orderData;
 
     const messages = [];
@@ -1280,10 +1280,12 @@ function showResult(type, orderData, detail) {
           </svg>
           Download Order Confirmation
         </button>
+        <div id="downloadPdfStatus" class="result-error-detail hidden" role="status" aria-live="polite"></div>
         <button class="btn btn-outline btn-full" id="placeAnotherBtn">Place Another Order</button>
       </div>`;
 
-    document.getElementById('downloadPdfBtn').addEventListener('click', () => downloadPDF(orderData));
+    const downloadPdfBtn = document.getElementById('downloadPdfBtn');
+    downloadPdfBtn.addEventListener('click', () => downloadPDF(orderData, downloadPdfBtn));
     document.getElementById('placeAnotherBtn').addEventListener('click', placeAnotherOrder);
 
   } else {
@@ -1371,258 +1373,52 @@ function placeAnotherOrder() {
 /* ============================================================
    PDF DOWNLOAD
    ============================================================ */
-/* buildPDF — shared PDF builder; returns the jsPDF doc object.
-   Call .save() to download, or .output('datauristring') for base64. */
-function buildPDF(d) {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const W   = doc.internal.pageSize.getWidth();
-  const H   = doc.internal.pageSize.getHeight();
-  const M   = 18;
-  let   y   = M;
-
-  function rule(yPos, thickness, gray) {
-    doc.setDrawColor(gray !== undefined ? gray : 0);
-    doc.setLineWidth(thickness || 0.3);
-    doc.line(M, yPos, W - M, yPos);
-  }
-
-  /* ================================================================
-     HEADER
-  ================================================================ */
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.text(CONFIG.BUSINESS_NAME.toUpperCase(), M, y + 7);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(80, 80, 80);
-  doc.text('ORDER CONFIRMATION', W - M, y + 4, { align: 'right' });
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(0, 0, 0);
-  doc.text(d.orderRef, W - M, y + 10, { align: 'right' });
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(100, 100, 100);
-  doc.text(CONFIG.BUSINESS_TAGLINE, M, y + 14);
-
-  y += 20;
-
-  /* double rule */
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.8);
-  doc.line(M, y, W - M, y);
-  y += 1;
-  doc.setLineWidth(0.2);
-  doc.line(M, y, W - M, y);
-  y += 7;
-
-  /* ================================================================
-     DATE & REF
-  ================================================================ */
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(80, 80, 80);
-  doc.text('DATE:', M, y);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 0, 0);
-  doc.text(d.orderDate, M + 14, y);
-
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(80, 80, 80);
-  doc.text('REF:', W / 2, y);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(0, 0, 0);
-  doc.text(d.orderRef, W / 2 + 11, y);
-
-  y += 10;
-
-  /* ================================================================
-     CUSTOMER DETAILS
-  ================================================================ */
-  const boxH = d.notes ? 38 : 30;
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.3);
-  doc.rect(M, y, W - M * 2, boxH);
-
-  doc.setFillColor(0, 0, 0);
-  doc.rect(M, y, W - M * 2, 7, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(255, 255, 255);
-  doc.text('CUSTOMER DETAILS', M + 3, y + 5);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(0, 0, 0);
-
-  const col2 = W / 2 + 5;
-  const rowA = y + 14;
-  const rowB = y + 21;
-  const rowC = y + 28;
-
-  doc.setFont('helvetica', 'bold');   doc.text('Business:', M + 3, rowA);
-  doc.setFont('helvetica', 'normal'); doc.text(d.shopName,    M + 22, rowA);
-  doc.setFont('helvetica', 'bold');   doc.text('Contact:',   M + 3, rowB);
-  doc.setFont('helvetica', 'normal'); doc.text(d.contactName, M + 22, rowB);
-
-  doc.setFont('helvetica', 'bold');   doc.text('Phone:', col2, rowA);
-  doc.setFont('helvetica', 'normal'); doc.text(d.phone,   col2 + 15, rowA);
-  doc.setFont('helvetica', 'bold');   doc.text('Email:',  col2, rowB);
-  doc.setFont('helvetica', 'normal'); doc.text(d.email,   col2 + 15, rowB);
-
-  if (d.notes) {
-    doc.setFont('helvetica', 'bold');   doc.text('Notes:', M + 3, rowC);
-    doc.setFont('helvetica', 'normal'); doc.text(d.notes,   M + 22, rowC);
-  }
-
-  y += boxH + 8;
-
-  /* ================================================================
-     ORDER ITEMS TABLE
-  ================================================================ */
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(80, 80, 80);
-  doc.text('ORDER ITEMS', M, y);
-  y += 1;
-
-  const anyDiscount = d.items.some(i => i.discountAmt > 0);
-
-  let tableHead, tableBody, colStyles;
-
-  if (anyDiscount) {
-    /* 7 columns: include Discount and Net Unit Price */
-    tableHead = [['Product', 'Unit', 'Qty', 'Unit Price', 'Discount', 'Net Unit Price', 'Line Total']];
-    tableBody = d.items.map(i => {
-      const netUnit = i.qty > 0 ? i.lineTotal / i.qty : i.unitPrice;
-      return [
-        i.name,
-        i.unit || '\u2014',
-        i.qty,
-        fmt(i.unitPrice),
-        i.discountAmt > 0 ? i.discountLabel : '\u2014',
-        i.discountAmt > 0 ? fmt(netUnit)    : '\u2014',
-        fmt(i.lineTotal),
-      ];
-    });
-    colStyles = {
-      0: { cellWidth: 'auto' },
-      1: { cellWidth: 14, halign: 'center' },
-      2: { cellWidth: 12, halign: 'center' },
-      3: { cellWidth: 20, halign: 'right'  },
-      4: { cellWidth: 25, halign: 'center' },
-      5: { cellWidth: 22, halign: 'right'  },
-      6: { cellWidth: 22, halign: 'right', fontStyle: 'bold' },
-    };
-  } else {
-    /* 5 columns: clean simple layout */
-    tableHead = [['Product', 'Unit', 'Qty', 'Unit Price', 'Line Total']];
-    tableBody = d.items.map(i => [
-      i.name,
-      i.unit || '\u2014',
-      i.qty,
-      fmt(i.unitPrice),
-      fmt(i.lineTotal),
-    ]);
-    colStyles = {
-      0: { cellWidth: 'auto' },
-      1: { cellWidth: 18, halign: 'center' },
-      2: { cellWidth: 12, halign: 'center' },
-      3: { cellWidth: 24, halign: 'right'  },
-      4: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
-    };
-  }
-
-  doc.autoTable({
-    startY: y,
-    margin: { left: M, right: M },
-    head: tableHead,
-    body: tableBody,
-    styles: {
-      fontSize: 8,
-      cellPadding: 3,
-      textColor: [0, 0, 0],
-      lineColor: [180, 180, 180],
-      lineWidth: 0.2,
-      overflow: 'linebreak',
-    },
-    headStyles: {
-      fillColor: [0, 0, 0],
-      textColor: [255, 255, 255],
-      fontStyle: 'bold',
-      fontSize: 7.5,
-    },
-    alternateRowStyles: { fillColor: [245, 245, 245] },
-    columnStyles: colStyles,
-  });
-
-  y = doc.lastAutoTable.finalY + 8;
-
-  /* ================================================================
-     TOTALS
-  ================================================================ */
-  const totRight = W - M;
-  const totLeft  = totRight - 84;
-
-  /* helper: one totals row */
-  function totLine(label, value, bold, size) {
-    doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    doc.setFontSize(size || 9);
-    doc.setTextColor(bold ? 0 : 80, bold ? 0 : 80, bold ? 0 : 80);
-    doc.text(label, totLeft, y);
-    doc.setTextColor(0, 0, 0);
-    doc.text(value, totRight, y, { align: 'right' });
-    y += 7;
-  }
-
-  rule(y, 0.2, 180);
-  y += 5;
-
-  /* Subtotal + order discount rows \u2014 only when an order discount exists */
-  if (d.orderDiscountAmt > 0) {
-    totLine('Subtotal (after item discounts):', fmt(d.subtotal || d.total));
-    const orderDiscountLabel = d.orderDiscountMode === 'fixed'
-      ? 'Order Discount (Fixed):'
-      : 'Order Discount (' + d.orderDiscountPct + '%):';
-    totLine(orderDiscountLabel, '-' + fmt(d.orderDiscountAmt));
-    rule(y, 0.2, 180);
-    y += 5;
-  }
-
-  /* ORDER TOTAL */
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(0, 0, 0);
-  doc.text('ORDER TOTAL:', totLeft, y);
-  doc.text(fmt(d.total), totRight, y, { align: 'right' });
-  y += 3;
-
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.6);
-  doc.line(totLeft, y, totRight, y);
-
-  /* ================================================================
-     FOOTER
-  ================================================================ */
-  y = H - 14;
-  rule(y, 0.2, 180);
-  y += 5;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
-  doc.setTextColor(120, 120, 120);
-  doc.text(CONFIG.BUSINESS_NAME + '  |  ' + CONFIG.BUSINESS_TAGLINE, M, y);
-  doc.text('Thank you for your business.', W - M, y, { align: 'right' });
-
-  return doc;
+function triggerPdfFileDownload(pdfFile) {
+  const blob = new Blob([pdfFile.bytes], { type: pdfFile.mimeType });
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = pdfFile.fileName;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
-function downloadPDF(d) {
-  buildPDF(d).save('Rio-Trading-Order-Confirmation-' + d.orderRef + '.pdf');
+async function downloadPDF(orderData, button) {
+  const status = document.getElementById('downloadPdfStatus');
+  const originalContent = button.innerHTML;
+  button.disabled = true;
+  button.textContent = 'Preparing Order Confirmation…';
+  if (status) {
+    status.textContent = '';
+    status.classList.add('hidden');
+  }
+
+  try {
+    if (!window.RioOrderApi || !orderData.downloadSubmissionId) {
+      throw new Error('The secure download details are unavailable.');
+    }
+
+    const payload = await RioOrderApi.requestOrderPdf(
+      CONFIG.ORDER_API_URL,
+      orderData.orderRef,
+      orderData.downloadSubmissionId
+    );
+    const pdfFile = RioOrderApi.decodePdfPayload(payload);
+    triggerPdfFileDownload(pdfFile);
+  } catch (error) {
+    console.error('PDF download error:', error);
+    if (status) {
+      status.textContent = (error && error.message ? error.message : 'The PDF could not be downloaded.') +
+        ' Your order is already saved; please try again or use the email attachment.';
+      status.classList.remove('hidden');
+    }
+  } finally {
+    button.disabled = false;
+    button.innerHTML = originalContent;
+  }
 }
 
 /* ============================================================

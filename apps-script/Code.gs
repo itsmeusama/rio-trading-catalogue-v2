@@ -2,8 +2,9 @@
  * Rio Trading permanent order backend - Phase 3
  *
  * The backend validates requests against the authoritative product sheet,
- * saves accepted orders before any email attempt, generates a PDF attachment,
- * sends it to the fixed owner address, and records the delivery result.
+ * saves accepted orders before any email attempt, generates the canonical PDF
+ * for email attachment or secured download, sends owner email, and records the
+ * delivery result.
  */
 
 var ORDER_SYSTEM = Object.freeze({
@@ -17,6 +18,8 @@ var ORDER_SYSTEM = Object.freeze({
   OWNER_EMAIL: 'riotraders87@gmail.com',
   TIME_ZONE: 'Europe/London',
   CURRENCY: 'GBP',
+  PDF_DOWNLOAD_ACTION: 'downloadOrderPdf',
+  MAX_PDF_DOWNLOAD_BYTES: 5 * 1024 * 1024,
   ORDER_STATUS_OPEN: 'Open',
   EMAIL_STATUS_PENDING: 'Pending',
   EMAIL_STATUS_SENT: 'Sent',
@@ -167,6 +170,7 @@ function validateOrderSystemSetup() {
     timeZone: spreadsheet.getSpreadsheetTimeZone(),
     ownerEmail: ORDER_SYSTEM.OWNER_EMAIL,
     emailDeliveryEnabled: true,
+    pdfDownloadEnabled: true,
     remainingDailyEmailQuota: MailApp.getRemainingDailyQuota(),
     phase: 3,
   };
@@ -190,18 +194,36 @@ function doGet() {
     configured: configured,
     persistenceEnabled: true,
     emailDeliveryEnabled: true,
+    pdfDownloadEnabled: true,
     phase: 3,
   });
 }
 
 /** Google Apps Script web-app POST entry point. */
 function doPost(event) {
+  var isPdfDownload = false;
+
   try {
     var payload = parsePostBody_(event);
+    isPdfDownload = isPdfDownloadRequest_(payload);
+    if (isPdfDownload) {
+      return jsonResponse_(processOrderPdfDownload_(payload));
+    }
     return jsonResponse_(processOrder_(payload));
   } catch (error) {
     if (!error || !error.publicCode) {
       console.error(error && error.stack ? error.stack : error);
+    }
+
+    if (isPdfDownload) {
+      return jsonResponse_({
+        ok: false,
+        action: ORDER_SYSTEM.PDF_DOWNLOAD_ACTION,
+        code: error && error.publicCode ? error.publicCode : 'PDF_DOWNLOAD_FAILED',
+        message: error && error.publicCode
+          ? error.message
+          : 'The Order Confirmation could not be prepared. Please try again.',
+      });
     }
 
     return jsonResponse_({
@@ -277,6 +299,61 @@ function parsePostBody_(event) {
   } catch (error) {
     throw publicError_('INVALID_REQUEST', 'The order request contains invalid JSON.');
   }
+}
+
+function isPdfDownloadRequest_(payload) {
+  return isObject_(payload) && payload.action === ORDER_SYSTEM.PDF_DOWNLOAD_ACTION;
+}
+
+function validatePdfDownloadRequest_(payload) {
+  if (!isPdfDownloadRequest_(payload)) {
+    throw publicError_('INVALID_REQUEST', 'A valid PDF download request is required.');
+  }
+
+  var orderRef = requiredString_(payload.orderRef, 'orderRef', 50, 'INVALID_REQUEST').toUpperCase();
+  if (!/^ORD-[0-9]{8}-[A-F0-9]{5}$/.test(orderRef)) {
+    throw publicError_('INVALID_REQUEST', 'A valid order reference is required.');
+  }
+
+  var submissionId = requiredString_(payload.submissionId, 'submissionId', 80, 'INVALID_REQUEST').toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(submissionId)) {
+    throw publicError_('INVALID_REQUEST', 'A valid submission ID is required.');
+  }
+
+  return { orderRef: orderRef, submissionId: submissionId };
+}
+
+function processOrderPdfDownload_(payload) {
+  var request = validatePdfDownloadRequest_(payload);
+  var spreadsheet = openConfiguredSpreadsheet_();
+  var sheets = getRequiredSheets_(spreadsheet);
+  var existing = findOrderBySubmissionId_(sheets.orders, request.submissionId);
+
+  if (
+    !existing ||
+    String(existing.values[ORDER_COLUMN.ORDER_REF - 1]) !== request.orderRef
+  ) {
+    throw publicError_(
+      'PDF_NOT_AVAILABLE',
+      'This Order Confirmation is not available for download.'
+    );
+  }
+
+  var order = loadSavedOrder_(sheets, existing);
+  var pdf = createOrderPdf_(order);
+  var pdfBytes = pdf.getBytes();
+  if (!pdfBytes || pdfBytes.length === 0 || pdfBytes.length > ORDER_SYSTEM.MAX_PDF_DOWNLOAD_BYTES) {
+    throw new Error('The generated PDF size is invalid.');
+  }
+
+  return {
+    ok: true,
+    action: ORDER_SYSTEM.PDF_DOWNLOAD_ACTION,
+    orderRef: order.orderRef,
+    fileName: 'Rio-Trading-Order-Confirmation-' + order.orderRef + '.pdf',
+    mimeType: 'application/pdf',
+    pdfBase64: Utilities.base64Encode(pdfBytes),
+  };
 }
 
 function validateOrderRequest_(payload) {
@@ -885,6 +962,7 @@ function buildOrderDocumentHtml_(order, forPdf) {
       '<td class="number">' + line.quantity + '</td>' +
       '<td class="number">' + formatMoney_(line.unitPrice) + '</td>' +
       '<td class="number">' + htmlEscape_(formatSavedDiscount_(line)) + '</td>' +
+      '<td class="number">' + formatNetUnitPrice_(line) + '</td>' +
       '<td class="number strong">' + formatMoney_(line.lineTotal) + '</td>' +
       '</tr>';
   }).join('');
@@ -939,7 +1017,8 @@ function buildOrderDocumentHtml_(order, forPdf) {
     '<td class="label">Email</td><td>' + htmlEscape_(order.customer.email) + '</td></tr></table>' + notes + '</div>' +
     '<div class="box-title">Order items</div><table class="items"><thead><tr>' +
     '<th>Product</th><th>Unit</th><th class="number">Qty</th><th class="number">Unit price</th>' +
-    '<th class="number">Discount</th><th class="number">Line total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<th class="number">Discount</th><th class="number">Net unit price</th>' +
+    '<th class="number">Line total</th></tr></thead><tbody>' + rows + '</tbody></table>' +
     '<table class="totals">' +
     totalRowHtml_('Gross subtotal', formatMoney_(order.grossSubtotal), false) +
     discountTotals +
@@ -991,6 +1070,14 @@ function formatSavedDiscount_(line) {
   if (!line.discountMode || !line.discountAmount) return 'None';
   if (line.discountMode === 'pct') return formatNumber_(line.discountValue) + '%';
   return formatMoney_(Number(line.discountValue)) + ' per unit';
+}
+
+function formatNetUnitPrice_(line) {
+  var quantity = Number(line.quantity);
+  if (!Number.isFinite(quantity) || quantity <= 0) return formatMoney_(line.unitPrice);
+
+  var lineTotalPence = toPence_(line.lineTotal);
+  return formatMoney_(fromPence_(Math.round(lineTotalPence / quantity)));
 }
 
 function formatSavedOrderDiscount_(order) {

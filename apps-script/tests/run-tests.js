@@ -32,6 +32,7 @@ const context = vm.createContext({
   Utilities: {
     formatDate: (date, timeZone, pattern) => pattern === 'yyyyMMdd' ? '20260804' : '04/08/2026 14:30',
     getUuid: () => 'abcde000-0000-4000-8000-000000000000',
+    base64Encode: bytes => Buffer.from(bytes).toString('base64'),
   },
 });
 
@@ -115,6 +116,8 @@ function assertMoneyParity(price, quantity, discount, orderDiscount) {
 
 function run() {
   const realDeliverSavedOrderEmail = context.deliverSavedOrderEmail_;
+  const realFindOrderBySubmissionId = context.findOrderBySubmissionId_;
+  const realJsonResponse = context.jsonResponse_;
   const catalogue = context.buildProductCatalogue_(productRows());
   assert.equal(Object.keys(catalogue).length, 4, 'ID-only rows must be ignored');
   assert.equal(catalogue['1'].unitPricePence, 1000);
@@ -464,6 +467,19 @@ function run() {
   assert.match(html, /Back door<br>Before 10am/);
   assert.match(html, /Order discount \(fixed\)/);
   assert.match(html, /-\u00A33\.00/);
+  assert.match(html, /<th class="number">Net unit price<\/th>/);
+  assert.match(html, /<td class="number">\u00A39\.00<\/td>/);
+  assert.match(html, /<td class="number">\u00A310\.99<\/td>/);
+  assert.equal(
+    context.formatNetUnitPrice_({ quantity: 10, unitPrice: 5.5, lineTotal: 46.75 }),
+    '\u00A34.68',
+    'net unit price must use the authoritative saved line total and round to display pence'
+  );
+  assert.equal(
+    context.formatNetUnitPrice_({ quantity: 0, unitPrice: 5.5, lineTotal: 0 }),
+    '\u00A35.50',
+    'unexpected invalid saved quantities must fall back safely to the unit price'
+  );
 
   const deliveryRequest = fixedOrderRequest;
   const deliveryOrderValues = context.buildOrderRow_(
@@ -478,6 +494,7 @@ function run() {
   const pdfBlob = {
     name: '',
     getAs() { return this; },
+    getBytes() { return [37, 80, 68, 70, 45, 49, 46, 52]; },
     setName(name) { this.name = name; return this; },
   };
   context.MimeType = { PDF: 'application/pdf' };
@@ -531,7 +548,74 @@ function run() {
   assert.equal(deliveryOrderValues[17], 'Failed');
   assert.match(String(deliveryOrderValues[19]), /Test delivery failure/);
 
-  console.log('Phase 3 tests passed: calculation parity, persistence, formula safety, duplicate safety, PDF HTML and email status handling.');
+  context.openConfiguredSpreadsheet_ = () => ({});
+  context.getRequiredSheets_ = () => deliverySheets;
+  context.findOrderBySubmissionId_ = realFindOrderBySubmissionId;
+  const validPdfDownload = context.processOrderPdfDownload_({
+    action: 'downloadOrderPdf',
+    orderRef: accepted.orderRef,
+    submissionId: request.submissionId,
+  });
+  assert.equal(validPdfDownload.ok, true);
+  assert.equal(validPdfDownload.action, 'downloadOrderPdf');
+  assert.equal(validPdfDownload.orderRef, accepted.orderRef);
+  assert.equal(validPdfDownload.mimeType, 'application/pdf');
+  assert.equal(
+    validPdfDownload.fileName,
+    'Rio-Trading-Order-Confirmation-ORD-20260802-ABCDE.pdf'
+  );
+  assert.equal(Buffer.from(validPdfDownload.pdfBase64, 'base64').toString('ascii'), '%PDF-1.4');
+  assert.equal(validPdfDownload.submissionId, undefined, 'the bearer credential must never be returned');
+  assert.equal(validPdfDownload.customer, undefined, 'the response must contain only the requested PDF');
+  assert.equal(sentMessages.length, 1, 'downloading a PDF must not send another email');
+
+  expectPublicError('PDF_NOT_AVAILABLE', () => context.processOrderPdfDownload_({
+    action: 'downloadOrderPdf',
+    orderRef: 'ORD-20260802-FFFFF',
+    submissionId: request.submissionId,
+  }));
+  expectPublicError('PDF_NOT_AVAILABLE', () => context.processOrderPdfDownload_({
+    action: 'downloadOrderPdf',
+    orderRef: accepted.orderRef,
+    submissionId: '22222222-2222-4222-8222-222222222222',
+  }));
+  expectPublicError('INVALID_REQUEST', () => context.processOrderPdfDownload_({
+    action: 'downloadOrderPdf',
+    orderRef: 'not-an-order-reference',
+    submissionId: request.submissionId,
+  }));
+
+  context.jsonResponse_ = data => data;
+  const routedPdfDownload = context.doPost({
+    postData: {
+      contents: JSON.stringify({
+        action: 'downloadOrderPdf',
+        orderRef: accepted.orderRef,
+        submissionId: request.submissionId,
+      }),
+    },
+  });
+  assert.equal(routedPdfDownload.ok, true, 'doPost must route PDF requests to the download operation');
+  const rejectedPdfDownload = context.doPost({
+    postData: {
+      contents: JSON.stringify({
+        action: 'downloadOrderPdf',
+        orderRef: accepted.orderRef,
+        submissionId: '22222222-2222-4222-8222-222222222222',
+      }),
+    },
+  });
+  assert.equal(rejectedPdfDownload.ok, false);
+  assert.equal(rejectedPdfDownload.code, 'PDF_NOT_AVAILABLE');
+  assert.equal(rejectedPdfDownload.saved, undefined, 'a download error must not masquerade as order failure');
+  const routedDuplicateOrder = context.doPost({
+    postData: { contents: JSON.stringify(validPayload()) },
+  });
+  assert.equal(routedDuplicateOrder.saved, true, 'ordinary order requests must retain their existing route');
+  assert.equal(routedDuplicateOrder.duplicate, true);
+  context.jsonResponse_ = realJsonResponse;
+
+  console.log('Phase 3 tests passed: calculations, persistence, formula and duplicate safety, PDF email, and secured PDF download.');
 }
 
 run();

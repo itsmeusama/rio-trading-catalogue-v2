@@ -55,7 +55,7 @@ This test sends one real email to the fixed owner address.
 7. Open the PDF and visually verify:
    - the Rio Trading heading, order reference and date are readable;
    - customer details and notes are complete;
-   - both products, quantities, prices and discounts are correct;
+   - both products, quantities, unit prices, discounts, net unit prices and line totals are correct;
    - the fixed whole-order discount is shown as `Order discount (fixed)`;
    - the final order total agrees with the `Orders` row;
    - no text is clipped, overlapping or missing.
@@ -115,8 +115,9 @@ After the new Apps Script version is deployed, run one order from the catalogue:
 3. Confirm the success screen shows a permanent `ORD-...` reference.
 4. Confirm one `Orders` row and the matching `Order Items` rows were added.
 5. Confirm `email_status` is `Sent` and the owner received one PDF email.
-6. Download the browser PDF and compare its items, discounts and total with the
-   saved order and emailed PDF.
+6. Click **Download Order Confirmation** and confirm Apps Script returns the
+   same canonical document design as the email attachment, including net unit
+   prices, discounts and totals.
 7. Do not click **Place Another Order** yet. Simulate an unchanged retry only if
    needed; it must return the same reference and create no additional rows or
    email.
