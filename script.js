@@ -464,9 +464,32 @@ function renderGrid() {
   list.forEach(p => productGrid.appendChild(buildCard(p)));
 }
 
+function getSafeImageUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const candidate = value.trim();
+  if (/[\u0000-\u001F\u007F<>"'`]/.test(candidate)) return '';
+
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'https:' && url.hostname ? url.href : '';
+  } catch (error) {
+    return '';
+  }
+}
+
 function getImg(product) {
-  if (product.image && product.image.startsWith('http')) return product.image;
-  return PRODUCT_IMAGES[product.id] || FALLBACK_IMG;
+  const sheetImage = getSafeImageUrl(product && product.image);
+  const mappedImage = getSafeImageUrl(PRODUCT_IMAGES[String(product && product.id)]);
+  return sheetImage || mappedImage || FALLBACK_IMG;
+}
+
+function configureProductImage(image, product) {
+  image.src = getImg(product);
+  image.alt = String(product && product.name ? product.name : 'Product');
+  image.loading = 'lazy';
+  image.addEventListener('error', () => {
+    if (image.getAttribute('src') !== FALLBACK_IMG) image.src = FALLBACK_IMG;
+  }, { once: true });
 }
 
 function buildCard(product) {
@@ -476,26 +499,25 @@ function buildCard(product) {
   card.className   = 'product-card';
   card.dataset.id  = product.id;
 
+  /* This template contains fixed application markup only. Spreadsheet values
+     are assigned through DOM properties below so they cannot become HTML. */
   card.innerHTML = `
     <div class="card-img-wrap">
-      <img class="card-img" src="${getImg(product)}" alt="${product.name}" loading="lazy"
-        onerror="this.src='${FALLBACK_IMG}'" />
-      <span class="card-cat-badge">${product.category}</span>
-      <span class="card-qty-badge${inCart ? '' : ' hidden'}">${qty}</span>
+      <img class="card-img" />
+      <span class="card-cat-badge"></span>
+      <span class="card-qty-badge"></span>
     </div>
     <div class="card-body">
-      <div class="card-name">${product.name}</div>
-      <div class="card-price">${fmtPence(product.pricePence)}</div>
-      <div class="card-unit">per ${product.unit || 'unit'}</div>
-      <div class="card-stock">${product.stock || 'In Stock'}</div>
+      <div class="card-name"></div>
+      <div class="card-price"></div>
+      <div class="card-unit"></div>
+      <div class="card-stock"></div>
     </div>
     <div class="card-footer">
-      <button class="btn-add${inCart ? ' edit' : ''}" aria-label="${inCart ? 'Edit quantity' : 'Add to order'}">
-        ${inCart ? 'Edit' : 'Add'}
-      </button>
+      <button class="btn-add"></button>
       <div class="stepper hidden">
         <button class="stepper-btn stepper-minus" aria-label="Decrease quantity">&minus;</button>
-        <input class="stepper-input" type="number" min="1" value="${qty || 1}" aria-label="Quantity" />
+        <input class="stepper-input" type="number" min="1" aria-label="Quantity" />
         <button class="stepper-btn stepper-plus" aria-label="Increase quantity">+</button>
         <button class="stepper-confirm" aria-label="Confirm quantity">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -514,6 +536,22 @@ function buildCard(product) {
         </button>
       </div>
     </div>`;
+
+  const image = card.querySelector('.card-img');
+  const qtyBadge = card.querySelector('.card-qty-badge');
+  const addButton = card.querySelector('.btn-add');
+  configureProductImage(image, product);
+  card.querySelector('.card-cat-badge').textContent = String(product.category || '');
+  qtyBadge.textContent = String(qty);
+  qtyBadge.classList.toggle('hidden', !inCart);
+  card.querySelector('.card-name').textContent = String(product.name || '');
+  card.querySelector('.card-price').textContent = fmtPence(product.pricePence);
+  card.querySelector('.card-unit').textContent = 'per ' + String(product.unit || 'unit');
+  card.querySelector('.card-stock').textContent = String(product.stock || 'In Stock');
+  addButton.textContent = inCart ? 'Edit' : 'Add';
+  addButton.classList.toggle('edit', inCart);
+  addButton.setAttribute('aria-label', inCart ? 'Edit quantity' : 'Add to order');
+  card.querySelector('.stepper-input').value = String(qty || 1);
 
   wireCardEvents(card, product);
   return card;
@@ -668,23 +706,24 @@ function buildCartRow(product, qty) {
   const row = document.createElement('div');
   row.className = 'cart-item';
   const line0 = calculateCartLine(product, qty);
+  /* As with product cards, this template is static. Remote catalogue values
+     are populated with textContent and safe attribute properties below. */
   row.innerHTML = `
-    <img class="cart-item-img" src="${getImg(product)}" alt="${product.name}" loading="lazy"
-      onerror="this.src='${FALLBACK_IMG}'" />
+    <img class="cart-item-img" />
     <div class="cart-item-info">
-      <div class="cart-item-name">${product.name}</div>
+      <div class="cart-item-name"></div>
       <div class="cart-item-price-line">
-        <span class="cart-item-orig-price">${fmtPence(product.pricePence)}</span>
+        <span class="cart-item-orig-price"></span>
         <span class="cart-item-disc-price"></span>
-        <span class="cart-item-per-unit">/ ${product.unit || 'unit'}</span>
+        <span class="cart-item-per-unit"></span>
       </div>
     </div>
     <div class="stepper-compact">
       <button class="stepper-btn cart-minus" aria-label="Decrease">&minus;</button>
-      <input class="stepper-input cart-qty" type="number" min="1" value="${qty}" aria-label="Quantity" />
+      <input class="stepper-input cart-qty" type="number" min="1" aria-label="Quantity" />
       <button class="stepper-btn cart-plus" aria-label="Increase">+</button>
     </div>
-    <span class="cart-item-line-total">${fmtPence(line0.lineTotalPence)}</span>
+    <span class="cart-item-line-total"></span>
     <button class="cart-item-remove" aria-label="Remove item">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -694,6 +733,13 @@ function buildCartRow(product, qty) {
         <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
       </svg>
     </button>`;
+
+  configureProductImage(row.querySelector('.cart-item-img'), product);
+  row.querySelector('.cart-item-name').textContent = String(product.name || '');
+  row.querySelector('.cart-item-orig-price').textContent = fmtPence(product.pricePence);
+  row.querySelector('.cart-item-per-unit').textContent = '/ ' + String(product.unit || 'unit');
+  row.querySelector('.cart-qty').value = String(qty);
+  row.querySelector('.cart-item-line-total').textContent = fmtPence(line0.lineTotalPence);
 
   /* ---- Discount trigger (appended into .cart-item-info) ---- */
   const existingDisc  = discounts[product.id];
@@ -929,7 +975,8 @@ function refreshDrawerTotals() {
 
 function syncCardBtn(productId) {
   /* Sync Add/Edit button + qty badge on the catalogue card */
-  const card = productGrid.querySelector('[data-id="' + productId + '"]');
+  const card = Array.from(productGrid.querySelectorAll('.product-card'))
+    .find(candidate => candidate.dataset.id === String(productId));
   if (!card) return;
   const btn   = card.querySelector('.btn-add');
   const badge = card.querySelector('.card-qty-badge');
