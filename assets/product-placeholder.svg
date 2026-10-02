@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" role="img" aria-labelledby="title description">
+  <title id="title">Product image coming soon</title>
+  <desc id="description">A neutral illustration of a delivery box for products without an image.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#e8eef9"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9b96f"/>
+      <stop offset="1" stop-color="#b58b35"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="600" height="400" fill="url(#background)"/>
+  <circle cx="300" cy="165" r="105" fill="#ffffff" opacity=".78"/>
+
+  <path d="M218 137 300 96l82 41-82 42z" fill="#e9cf93"/>
+  <path d="m218 137 82 42v93l-82-42z" fill="url(#box)"/>
+  <path d="m382 137-82 42v93l82-42z" fill="#c9a14d"/>
+  <path d="m300 96 82 41-27 14-82-41z" fill="#f2dda9" opacity=".9"/>
+  <path d="M300 179v93" fill="none" stroke="#987224" stroke-width="5" opacity=".55"/>
+  <path d="m270 110 82 42v29l-24-6-28 18v-14l-82-42z" fill="#f7e7bd" opacity=".92"/>
+
+  <text x="300" y="320" text-anchor="middle" fill="#172033" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700">PRODUCT IMAGE</text>
+  <text x="300" y="350" text-anchor="middle" fill="#64748b" font-family="Arial, Helvetica, sans-serif" font-size="18">COMING SOON</text>
+</svg>

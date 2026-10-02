@@ -59,6 +59,12 @@ assert.ok(cartRowSource.includes(".textContent = '/ ' + String(product.unit || '
 assert.equal(source.includes('onerror='), false);
 const imageSource = extractFunction('configureProductImage');
 assert.ok(imageSource.includes("image.addEventListener('error'"));
+assert.ok(source.includes("const FALLBACK_IMG = 'assets/product-placeholder.svg';"));
+assert.equal(source.includes("const FALLBACK_IMG = 'https://images.unsplash.com/"), false);
+assert.equal(
+  fs.existsSync(path.join(__dirname, '..', 'assets', 'product-placeholder.svg')),
+  true
+);
 const syncSource = extractFunction('syncCardBtn');
 assert.equal(syncSource.includes("querySelector('[data-id=\"'"), false);
 assert.ok(syncSource.includes("candidate.dataset.id === String(productId)"));

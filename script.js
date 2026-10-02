@@ -12,13 +12,6 @@ const CONFIG = {
   BUSINESS_TAGLINE:    'Wholesale Catalogue',
 };
 
-/* ---- SUBCATEGORY MAP ---- */
-/* Maps parent category name → array of subcategory labels */
-const SUBCATEGORIES = {
-  'Grocery & Essentials': ['English', 'Asian'],
-  'Snacks': ['Biscuits', 'Cakes & Bakery', 'Crisps'],
-};
-
 /* Image map — Unsplash URLs per product id */
 const PRODUCT_IMAGES = {
   '1':  'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=400&q=80',
@@ -40,7 +33,7 @@ const PRODUCT_IMAGES = {
   '17': 'https://images.unsplash.com/photo-1563729784474-d77dbb933a9e?w=400&q=80',
   '18': 'https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=400&q=80',
 };
-const FALLBACK_IMG = 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=400&q=80';
+const FALLBACK_IMG = 'assets/product-placeholder.svg';
 
 /* ============================================================
    STATE
@@ -358,6 +351,7 @@ async function loadProducts() {
     if (requestId !== catalogueRequest) return;
     allProducts = products;
     reconcileCartWithCatalogue();
+    buildCategoryPills();
     setCatalogueState('ready');
     renderGrid();
     updateCartUI();
@@ -440,13 +434,23 @@ function parseCSVRows(text) {
 /* ============================================================
    PRODUCT GRID
    ============================================================ */
+function productMatchesFilters(product, category, subcategory, query) {
+  if (category !== 'all' && normaliseFilterValue(product.category) !== normaliseFilterValue(category)) {
+    return false;
+  }
+  if (subcategory !== 'all' && normaliseFilterValue(product.subcategory) !== normaliseFilterValue(subcategory)) {
+    return false;
+  }
+  if (query && !normaliseFilterValue(product.name).includes(normaliseFilterValue(query))) {
+    return false;
+  }
+  return true;
+}
+
 function getFiltered() {
-  return allProducts.filter(p => {
-    if (activeCategory !== 'all' && p.category !== activeCategory) return false;
-    if (activeSubcategory !== 'all' && p.subcategory !== activeSubcategory) return false;
-    if (searchQuery && !p.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  });
+  return allProducts.filter(product => (
+    productMatchesFilters(product, activeCategory, activeSubcategory, searchQuery)
+  ));
 }
 
 function renderGrid() {
@@ -998,15 +1002,69 @@ function syncCardBtn(productId) {
 /* ============================================================
    CATEGORY / SUBCATEGORY FILTERS
    ============================================================ */
-function initCategoryPills() {
-  categoryPills.querySelectorAll('.pill').forEach(btn => {
+function normaliseFilterValue(value) {
+  return String(value === undefined || value === null ? '' : value).trim().toLowerCase();
+}
+
+function getCatalogueCategories(products) {
+  const seen = new Set();
+  const categories = [];
+
+  products.forEach(product => {
+    const category = String(product && product.category ? product.category : '').trim();
+    const key = normaliseFilterValue(category);
+    if (!category || key === 'all' || seen.has(key)) return;
+    seen.add(key);
+    categories.push(category);
+  });
+
+  return categories;
+}
+
+function getCatalogueSubcategories(products, category) {
+  const seen = new Set();
+  const subcategories = [];
+  const categoryKey = normaliseFilterValue(category);
+
+  products.forEach(product => {
+    if (!product || normaliseFilterValue(product.category) !== categoryKey) return;
+    const subcategory = String(product.subcategory || '').trim();
+    const key = normaliseFilterValue(subcategory);
+    if (!subcategory || key === 'all' || seen.has(key)) return;
+    seen.add(key);
+    subcategories.push(subcategory);
+  });
+
+  return subcategories;
+}
+
+function buildCategoryPills() {
+  const categories = getCatalogueCategories(allProducts);
+  activeCategory = 'all';
+  activeSubcategory = 'all';
+  categoryPills.innerHTML = '';
+  subcategoryPills.innerHTML = '';
+  subcategoryPills.classList.add('hidden');
+
+  ['all', ...categories].forEach(category => {
+    const btn = document.createElement('button');
+    btn.className = 'pill' + (category === 'all' ? ' active' : '');
+    btn.type = 'button';
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', category === 'all' ? 'true' : 'false');
+    btn.dataset.cat = category;
+    btn.textContent = category === 'all' ? 'All' : category;
+    btn.disabled = catalogueState !== 'ready';
+
     btn.addEventListener('click', () => {
       categoryPills.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+      categoryPills.querySelectorAll('.pill').forEach(b => b.setAttribute('aria-selected', 'false'));
       btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
       activeCategory    = btn.dataset.cat;
       activeSubcategory = 'all';
 
-      const subs = SUBCATEGORIES[activeCategory];
+      const subs = getCatalogueSubcategories(allProducts, activeCategory);
       if (subs && subs.length) {
         buildSubcategoryPills(subs);
         subcategoryPills.classList.remove('hidden');
@@ -1016,6 +1074,8 @@ function initCategoryPills() {
       }
       renderGrid();
     });
+
+    categoryPills.appendChild(btn);
   });
 }
 
@@ -1024,22 +1084,32 @@ function buildSubcategoryPills(subs) {
 
   const allBtn = document.createElement('button');
   allBtn.className    = 'pill active';
+  allBtn.type         = 'button';
+  allBtn.setAttribute('role', 'tab');
+  allBtn.setAttribute('aria-selected', 'true');
   allBtn.textContent  = 'All';
   allBtn.dataset.sub  = 'all';
+  allBtn.disabled     = catalogueState !== 'ready';
   subcategoryPills.appendChild(allBtn);
 
   subs.forEach(sub => {
     const btn = document.createElement('button');
     btn.className   = 'pill';
+    btn.type        = 'button';
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', 'false');
     btn.textContent = sub;
     btn.dataset.sub = sub;
+    btn.disabled    = catalogueState !== 'ready';
     subcategoryPills.appendChild(btn);
   });
 
   subcategoryPills.querySelectorAll('.pill').forEach(btn => {
     btn.addEventListener('click', () => {
       subcategoryPills.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+      subcategoryPills.querySelectorAll('.pill').forEach(b => b.setAttribute('aria-selected', 'false'));
       btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
       activeSubcategory = btn.dataset.sub;
       renderGrid();
     });
@@ -1611,7 +1681,6 @@ function initEvents() {
    ============================================================ */
 document.addEventListener('DOMContentLoaded', () => {
   loadCart();
-  initCategoryPills();
   initSearch();
   initPromoSlider();
   initEvents();
