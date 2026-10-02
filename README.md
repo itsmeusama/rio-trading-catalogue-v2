@@ -25,7 +25,7 @@ The retailer's email is currently stored with the order but is not sent a confir
 
 - Responsive product cards for mobile, tablet, and desktop use
 - Live product data from a published Google Sheets CSV
-- Product search, category filters, and selected subcategory filters
+- Product search plus category and subcategory filters generated from active spreadsheet products
 - Sheet-controlled product names, prices, units, stock text, images, and active status
 - Loading, retry, and empty-result states
 - Fail-closed catalogue behaviour: ordering is disabled if current data cannot be loaded or validated
@@ -111,6 +111,7 @@ The browser is responsible for interaction and an immediate preview. Apps Script
 │   └── order-system-phase-1.md
 ├── tests/
 │   ├── money.test.js
+│   ├── category-filters.test.js
 │   └── order-api.test.js
 ├── index.html
 ├── money.js
@@ -165,16 +166,18 @@ Products are managed in the existing Google Sheet. The published product tab mus
 | `id` | Yes | Stable, unique product identifier used by the cart and backend. |
 | `name` | Yes | Product name displayed and saved with the order. |
 | `category` | Yes | Parent category displayed on cards and used for filtering. |
-| `subcategory` | No | Optional subcategory used by configured parent categories. |
+| `subcategory` | No | Optional child filter generated under its product category. |
 | `price` | Yes | Positive unit price in GBP. |
 | `unit` | No | Sales unit such as `case`, `pack`, `box`, or `unit`. |
 | `stock` | No | Informational stock wording displayed on the card. |
-| `image` | No | Public HTTP(S) product image URL. |
+| `image` | No | Public HTTPS product image URL. |
 | `active` | No | `true`, `1`, or `yes` displays the product; `false` or `0` hides it. Blank defaults to active. |
 
 Product IDs must remain unique. Invalid prices, duplicate IDs, malformed active values, missing required columns, or an empty catalogue cause the frontend to show **Catalogue unavailable** and prevent ordering.
 
-The top-level category buttons are currently defined in `index.html`. Subcategory mappings are defined in `SUBCATEGORIES` inside `script.js`. Adding a completely new category therefore still requires a small code update as well as a new sheet value.
+Category and subcategory filters are generated automatically from active products. Their display order follows their first appearance in the published product sheet. To add a category or subcategory, use the new value on at least one active product row; no frontend or Apps Script deployment is required. To rename one, update every applicable active product row so the old and new names do not temporarily appear as separate filters. Blank subcategories are allowed, and a category with no populated subcategories shows no subcategory row.
+
+Filter matching ignores capitalization and surrounding spaces while retaining the first spreadsheet spelling for display. `All` is reserved for the built-in unfiltered option and should not be used as a category or subcategory name.
 
 The `stock` value is currently descriptive only. It does not limit quantities, reserve inventory, or prevent an order that exceeds the displayed stock.
 
@@ -257,8 +260,6 @@ The current backend accepts legacy version-1 percentage-only requests and versio
 - The application is intended for the owner/salesperson, but the static site currently has no login or access restriction. Anyone who discovers its URL can open the catalogue and attempt an order.
 - The Apps Script endpoint must be publicly callable for the static frontend. It reduces abuse risk through authoritative recalculation, request validation, a fixed email recipient, duplicate protection, and limits, but it is not user authentication.
 - Product management is performed directly in Google Sheets; there is no private product-admin page yet.
-- Catalogue categories are partly hard-coded in the frontend.
-- Catalogue values are owner-managed trusted data, and some product-card fields are still rendered through HTML templates rather than exclusively through `textContent`.
 - Stock is informational and is not enforced at submission.
 - VAT, delivery charges, delivery dates, customer account numbers, payment terms, and customer purchase-order references are not implemented.
 - The retailer does not currently receive an automatic confirmation email.
